@@ -54,7 +54,7 @@ jobs:
         fetch-depth: 0
 
     - name: 🐍 Set up Python
-      uses: actions/setup-python@v4  # v4 for Node.js 16+ compatibility
+      uses: actions/setup-python@v5  # Updated to v5 (requires Node.js 20+)
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         cache: 'pip'

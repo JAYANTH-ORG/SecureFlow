@@ -75,12 +75,12 @@ jobs:
         if [ ${#SCAN_TYPES[@]} -eq 0 ]; then
           echo "matrix={\"scan_type\":[\"general\"]}" >> $GITHUB_OUTPUT
         else
-          MATRIX=$(printf '"%s"\n' "${SCAN_TYPES[@]}" | jq -s .)
+          MATRIX=$(printf '%s\n' "${SCAN_TYPES[@]}" | jq -R . | jq -s .)
           echo "matrix={\"scan_type\":$MATRIX}" >> $GITHUB_OUTPUT
         fi
         
         # Create scan configuration - fix JSON formatting
-        SCAN_TYPES_JSON=$(printf '"%s"\n' "${SCAN_TYPES[@]}" | jq -s .)
+        SCAN_TYPES_JSON=$(printf '%s\n' "${SCAN_TYPES[@]}" | jq -R . | jq -s .)
         cat > scan_config.json << EOF
         {
           "project_name": "${{ github.repository }}",

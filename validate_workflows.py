@@ -42,6 +42,40 @@ def check_github_actions_expressions(content, file_path):
     
     return issues
 
+def check_action_versions(content, file_path):
+    """Check for deprecated action versions"""
+    issues = []
+    
+    # Check for deprecated action versions
+    deprecated_actions = {
+        'actions/upload-artifact@v3': 'actions/upload-artifact@v4',
+        'actions/download-artifact@v3': 'actions/download-artifact@v4',
+        'actions/setup-python@v4': 'actions/setup-python@v5',
+        'github/codeql-action@v2': 'github/codeql-action@v3'
+    }
+    
+    for deprecated, recommended in deprecated_actions.items():
+        if deprecated in content:
+            line_num = content[:content.find(deprecated)].count('\n') + 1
+            issues.append(f"Line {line_num}: Deprecated action '{deprecated}' should use '{recommended}'")
+    
+    return issues
+
+def check_matrix_syntax(content, file_path):
+    """Check for matrix syntax issues"""
+    issues = []
+    
+    # Look for matrix configurations
+    if 'matrix:' in content:
+        # Check for common JSON formatting issues in shell commands
+        if 'printf' in content and 'jq' in content:
+            # Look for potentially problematic printf patterns
+            if 'printf \'"%s"\\n\'' in content:
+                line_num = content[:content.find('printf \'"%s"\\n\'')].count('\n') + 1
+                issues.append(f"Line {line_num}: Potentially malformed JSON in matrix generation - use jq -R . instead")
+    
+    return issues
+
 def validate_workflow_file(file_path):
     """Validate a GitHub Actions workflow file"""
     print(f"Validating: {file_path}")
@@ -64,6 +98,8 @@ def validate_workflow_file(file_path):
         
         # Check for GitHub Actions specific issues
         issues = check_github_actions_expressions(content, file_path)
+        issues += check_action_versions(content, file_path)
+        issues += check_matrix_syntax(content, file_path)
         
         if issues:
             print(f"⚠️  Potential issues in {file_path}:")
