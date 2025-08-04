@@ -96,15 +96,14 @@ jobs:
           SCAN_TYPES_JSON+="\"${SCAN_TYPES[$i]}\""
         done
         SCAN_TYPES_JSON+="]"
-        cat > scan_config.json << EOF
-        {
-          "project_name": "${{ github.repository }}",
-          "scan_types": $SCAN_TYPES_JSON,
-          "compliance_frameworks": ["SOC2", "PCI-DSS"],
-          "container_image": "${{ github.event.inputs.container_image }}",
-          "notification_level": "${{ github.event.inputs.notification_level || 'high' }}"
-        }
-        EOF
+        # Create scan configuration using echo to avoid indentation issues
+        echo "{" > scan_config.json
+        echo "  \"project_name\": \"${{ github.repository }}\"," >> scan_config.json
+        echo "  \"scan_types\": $SCAN_TYPES_JSON," >> scan_config.json
+        echo "  \"compliance_frameworks\": [\"SOC2\", \"PCI-DSS\"]," >> scan_config.json
+        echo "  \"container_image\": \"${{ github.event.inputs.container_image }}\"," >> scan_config.json
+        echo "  \"notification_level\": \"${{ github.event.inputs.notification_level || 'high' }}\"" >> scan_config.json
+        echo "}" >> scan_config.json
         
         echo "scan_config=$(cat scan_config.json)" >> $GITHUB_OUTPUT
 
@@ -135,7 +134,7 @@ jobs:
 
     - name: 🟢 Set up Node.js
       if: matrix.scan_type == 'javascript'
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
