@@ -71,15 +71,20 @@ jobs:
           SCAN_TYPES+=("kubernetes")
         fi
         
-        # Create matrix
-        MATRIX=$(printf '%s\n' "${SCAN_TYPES[@]}" | jq -R . | jq -s .)
-        echo "matrix={\"scan_type\":$MATRIX}" >> $GITHUB_OUTPUT
+        # Create matrix - fix JSON formatting
+        if [ ${#SCAN_TYPES[@]} -eq 0 ]; then
+          echo "matrix={\"scan_type\":[\"general\"]}" >> $GITHUB_OUTPUT
+        else
+          MATRIX=$(printf '"%s"\n' "${SCAN_TYPES[@]}" | jq -s .)
+          echo "matrix={\"scan_type\":$MATRIX}" >> $GITHUB_OUTPUT
+        fi
         
-        # Create scan configuration
+        # Create scan configuration - fix JSON formatting
+        SCAN_TYPES_JSON=$(printf '"%s"\n' "${SCAN_TYPES[@]}" | jq -s .)
         cat > scan_config.json << EOF
         {
           "project_name": "${{ github.repository }}",
-          "scan_types": $(echo "${SCAN_TYPES[@]}" | jq -R 'split(" ")'),
+          "scan_types": $SCAN_TYPES_JSON,
           "compliance_frameworks": $(echo "${{ github.event.inputs.compliance_frameworks || 'SOC2,PCI-DSS' }}" | tr ',' '\n' | jq -R . | jq -s .),
           "container_image": "${{ github.event.inputs.container_image }}",
           "notification_level": "${{ github.event.inputs.notification_level || 'high' }}"
@@ -660,6 +665,7 @@ jobs:
       with:
         name: comprehensive-security-report-${{ github.sha }}
         path: report/
+      continue-on-error: true
 
     - name: 📧 Create Security Issue
       if: always()

@@ -71,8 +71,12 @@ def validate_workflow_file(file_path):
                 print(f"   {issue}")
         
         # Check for required GitHub Actions fields
-        if 'on' not in yaml_content:
+        # Note: YAML parser interprets 'on:' as boolean True, not string 'on'
+        if 'on' not in yaml_content and True not in yaml_content:
             print(f"⚠️  Warning: No 'on' trigger found in {file_path}")
+        elif True in yaml_content:
+            # YAML interpreted 'on:' as boolean True - this is expected
+            print(f"ℹ️  Found 'on' trigger (parsed as boolean True due to YAML 1.1 spec)")
         
         if 'jobs' in yaml_content:
             job_count = len(yaml_content['jobs'])
