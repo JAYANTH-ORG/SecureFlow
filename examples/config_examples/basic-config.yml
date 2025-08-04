@@ -1,0 +1,60 @@
+# Basic SecureFlow Configuration
+
+# General settings
+log_level: "INFO"
+output_format: "json"
+cache_enabled: true
+cache_ttl: 3600
+
+# Scanning configuration
+scanning:
+  # Enable/disable scan types
+  enable_sast: true
+  enable_sca: true
+  enable_secrets: true
+  enable_iac: true
+  enable_container: true
+  
+  # Tool selection
+  sast_tool: "semgrep"
+  sca_tool: "safety"
+  secrets_tool: "truffhog"
+  iac_tool: "checkov"
+  container_tool: "trivy"
+  
+  # Severity settings
+  severity_threshold: "medium"
+  fail_on_high: true
+  fail_on_critical: true
+  
+  # Exclusions
+  exclude_paths:
+    - ".git"
+    - ".venv"
+    - "node_modules"
+    - "__pycache__"
+    - "*.pyc"
+    - "*.log"
+    - "dist/"
+    - "build/"
+
+# Compliance settings
+compliance:
+  frameworks:
+    - "SOC2"
+  generate_reports: true
+  report_format: "json"
+
+# Notification settings (optional)
+notifications:
+  enable_email: false
+  enable_slack: false
+  enable_teams: false
+  
+  notify_on_high: true
+  notify_on_critical: true
+  notify_on_compliance_fail: true
+
+# Performance settings
+max_concurrent_scans: 4
+scan_timeout: 1800  # 30 minutes

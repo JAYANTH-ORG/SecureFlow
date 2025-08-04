@@ -1,0 +1,21 @@
+# Reusable step template for setting up SecureFlow
+steps:
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '3.11'
+    addToPath: true
+  displayName: 'Setup Python'
+
+- script: |
+    python -m pip install --upgrade pip
+    pip install secureflow-core
+  displayName: 'Install SecureFlow'
+
+- script: |
+    # Download any existing configuration
+    if [ -f ".secureflow.yaml" ]; then
+      echo "Using existing SecureFlow configuration"
+    else
+      secureflow init --project-type auto-detect
+    fi
+  displayName: 'Setup SecureFlow Configuration'

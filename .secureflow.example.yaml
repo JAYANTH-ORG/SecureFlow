@@ -1,0 +1,159 @@
+# SecureFlow Configuration File
+# Copy this file to your repository root as .secureflow.yaml
+
+# Project Information
+project:
+  name: "my-project"
+  description: "Project security configuration"
+  team: "development"
+  contact: "security@company.com"
+
+# Scanning Configuration
+scanning:
+  # SAST (Static Application Security Testing)
+  sast_tool: "semgrep"  # Options: semgrep, bandit, eslint
+  severity_threshold: "medium"  # Options: low, medium, high, critical
+  
+  # SCA (Software Composition Analysis)
+  sca_tool: "safety"  # Options: safety, pip-audit, npm-audit
+  check_licenses: true
+  allowed_licenses:
+    - "MIT"
+    - "Apache-2.0"
+    - "BSD-3-Clause"
+    - "ISC"
+  
+  # Secrets Detection
+  secrets_tool: "trufflehog"  # Options: trufflehog, detect-secrets
+  
+  # Infrastructure as Code
+  iac_tool: "checkov"  # Options: checkov, tfsec, terrascan
+  
+  # Container Security
+  container_tool: "trivy"  # Options: trivy, grype, docker-scout
+
+  # Scan Exclusions
+  exclude_paths:
+    - ".git/"
+    - ".venv/"
+    - "node_modules/"
+    - "__pycache__/"
+    - "*.pyc"
+    - "*.log"
+    - "test_data/"
+    - "vendor/"
+
+# Azure DevOps Integration
+azure:
+  organization: "your-org"
+  project: "your-project"
+  
+  # Work Item Creation
+  work_items:
+    enabled: true
+    area_path: "Security"
+    iteration_path: "Security\\Current"
+    assign_to: "security@company.com"
+    severity_mapping:
+      critical: "1"  # Priority 1 (Critical)
+      high: "2"      # Priority 2 (High)
+      medium: "3"    # Priority 3 (Medium)
+      low: "4"       # Priority 4 (Low)
+  
+  # Dashboard Configuration
+  dashboard:
+    enabled: true
+    name: "Security Overview"
+    auto_update: true
+
+# Compliance Frameworks
+compliance:
+  frameworks:
+    - "SOC2"
+    - "PCI-DSS"
+    - "NIST"
+  
+  # Custom compliance rules
+  custom_rules:
+    - name: "encryption-at-rest"
+      description: "Ensure data encryption at rest"
+      severity: "high"
+      category: "data-protection"
+
+# Reporting Configuration
+reporting:
+  # Output formats
+  formats:
+    - "html"
+    - "json"
+    - "sarif"
+  
+  # Report options
+  include_charts: true
+  include_metrics: true
+  include_remediation: true
+  
+  # Custom report templates
+  templates:
+    html: "security-report.html.j2"
+    email: "security-email.html.j2"
+
+# Notification Settings
+notifications:
+  email:
+    enabled: true
+    recipients:
+      - "security@company.com"
+      - "devops@company.com"
+    smtp_server: "smtp.company.com"
+    
+  teams:
+    enabled: false
+    webhook_url: "${TEAMS_WEBHOOK_URL}"
+    
+  slack:
+    enabled: false
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+
+# Plugin Configuration
+plugins:
+  enabled:
+    - "github-integration"
+    - "jira-integration"
+    - "custom-rules"
+  
+  settings:
+    github:
+      token: "${GITHUB_TOKEN}"
+      create_issues: true
+    
+    jira:
+      url: "https://company.atlassian.net"
+      token: "${JIRA_TOKEN}"
+      project_key: "SEC"
+
+# Advanced Settings
+advanced:
+  # Parallel scanning
+  parallel_scans: true
+  max_workers: 4
+  
+  # Timeout settings (in seconds)
+  scan_timeout: 1800  # 30 minutes
+  command_timeout: 300  # 5 minutes
+  
+  # Retry configuration
+  max_retries: 3
+  retry_delay: 5
+  
+  # Logging
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_file: ".secureflow.log"
+  
+  # Performance tuning
+  cache_enabled: true
+  cache_ttl: 3600  # 1 hour
+  
+  # Security settings
+  verify_ssl: true
+  user_agent: "SecureFlow/1.0.0"

@@ -1,0 +1,103 @@
+# SecureFlow Basic Security Pipeline
+# This pipeline provides basic security scanning using SecureFlow-Core
+# Usage: Include this template in your azure-pipelines.yml
+
+parameters:
+- name: repository_path
+  type: string
+  default: '$(Build.SourcesDirectory)'
+- name: python_version
+  type: string
+  default: '3.11'
+- name: scan_types
+  type: object
+  default: ['sast', 'sca', 'secrets']
+- name: fail_on_high
+  type: boolean
+  default: true
+
+stages:
+- stage: SecurityScan
+  displayName: 'Security Scanning'
+  jobs:
+  - job: SecureFlowScan
+    displayName: 'SecureFlow Security Scan'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '${{ parameters.python_version }}'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install secureflow-core
+      displayName: 'Install SecureFlow'
+
+    # SAST Scanning
+    - ${{ if contains(parameters.scan_types, 'sast') }}:
+      - script: |
+          secureflow scan sast ${{ parameters.repository_path }} \
+            --output-format json \
+            --output-file $(Agent.TempDirectory)/sast-results.json
+        displayName: 'Run SAST Scan'
+        continueOnError: true
+
+    # SCA Scanning  
+    - ${{ if contains(parameters.scan_types, 'sca') }}:
+      - script: |
+          secureflow scan sca ${{ parameters.repository_path }} \
+            --output-format json \
+            --output-file $(Agent.TempDirectory)/sca-results.json
+        displayName: 'Run SCA Scan'
+        continueOnError: true
+
+    # Secrets Scanning
+    - ${{ if contains(parameters.scan_types, 'secrets') }}:
+      - script: |
+          secureflow scan secrets ${{ parameters.repository_path }} \
+            --output-format json \
+            --output-file $(Agent.TempDirectory)/secrets-results.json
+        displayName: 'Run Secrets Scan'
+        continueOnError: true
+
+    # Generate Report
+    - script: |
+        secureflow report generate \
+          --input $(Agent.TempDirectory)/*-results.json \
+          --format html \
+          --output $(Agent.TempDirectory)/security-report.html
+      displayName: 'Generate Security Report'
+      continueOnError: true
+
+    # Publish Results
+    - task: PublishTestResults@2
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: '$(Agent.TempDirectory)/security-report.xml'
+        mergeTestResults: true
+        failTaskOnFailedTests: ${{ parameters.fail_on_high }}
+      displayName: 'Publish Security Results'
+      condition: succeededOrFailed()
+
+    - task: PublishHtmlReport@1
+      inputs:
+        reportDir: '$(Agent.TempDirectory)'
+        tabName: 'Security Report'
+      displayName: 'Publish Security Report'
+      condition: succeededOrFailed()
+
+    # Create Work Items for High/Critical Issues
+    - script: |
+        secureflow azure create-work-items \
+          --input $(Agent.TempDirectory)/*-results.json \
+          --severity high,critical \
+          --project $(System.TeamProject) \
+          --area-path "Security"
+      displayName: 'Create Work Items for Critical Issues'
+      condition: succeededOrFailed()
+      env:
+        AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)

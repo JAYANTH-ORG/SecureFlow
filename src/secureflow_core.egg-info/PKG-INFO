@@ -1,0 +1,372 @@
+Metadata-Version: 2.4
+Name: secureflow-core
+Version: 1.0.0
+Summary: A comprehensive shared DevSecOps library for Azure DevOps and modern security automation
+Author-email: CodeVibe Team <devops@codevibe.com>
+License: MIT License
+        
+        Copyright (c) 2024 CodeVibe Team
+        
+        Permission is hereby granted, free of charge, to any person obtaining a copy
+        of this software and associated documentation files (the "Software"), to deal
+        in the Software without restriction, including without limitation the rights
+        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        copies of the Software, and to permit persons to whom the Software is
+        furnished to do so, subject to the following conditions:
+        
+        The above copyright notice and this permission notice shall be included in all
+        copies or substantial portions of the Software.
+        
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+        SOFTWARE.
+        
+Project-URL: Homepage, https://github.com/codevibe/secureflow-core
+Project-URL: Repository, https://github.com/codevibe/secureflow-core.git
+Project-URL: Documentation, https://secureflow-core.readthedocs.io
+Project-URL: Issues, https://github.com/codevibe/secureflow-core/issues
+Keywords: devsecops,security,azure-devops,automation,vulnerability-scanning
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Security
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: requests>=2.31.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: click>=8.1.0
+Requires-Dist: azure-devops>=7.1.0b4
+Requires-Dist: azure-identity>=1.15.0
+Requires-Dist: azure-keyvault-secrets>=4.7.0
+Requires-Dist: azure-mgmt-security>=6.0.0
+Requires-Dist: jinja2>=3.1.0
+Requires-Dist: pydantic>=2.5.0
+Requires-Dist: rich>=13.7.0
+Requires-Dist: typer>=0.9.0
+Requires-Dist: httpx>=0.26.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: semver>=3.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: black>=23.9.0; extra == "dev"
+Requires-Dist: isort>=5.12.0; extra == "dev"
+Requires-Dist: flake8>=6.1.0; extra == "dev"
+Requires-Dist: mypy>=1.6.0; extra == "dev"
+Requires-Dist: pre-commit>=3.5.0; extra == "dev"
+Requires-Dist: bandit>=1.7.5; extra == "dev"
+Provides-Extra: docs
+Requires-Dist: mkdocs>=1.5.0; extra == "docs"
+Requires-Dist: mkdocs-material>=9.4.0; extra == "docs"
+Requires-Dist: mkdocstrings[python]>=0.23.0; extra == "docs"
+Dynamic: license-file
+
+# SecureFlow Core - Shared DevSecOps Library
+
+[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Azure DevOps](https://img.shields.io/badge/Azure_DevOps-Ready-blue.svg)](https://azure.microsoft.com/en-us/services/devops/)
+
+A comprehensive, modern shared DevSecOps library that teams can integrate into any repository for automated security scanning, vulnerability management, compliance checking, and Azure DevOps pipeline integration.
+
+## 🚀 Features
+
+### Core Security Capabilities
+- **🔍 Vulnerability Scanning**: SAST, DAST, SCA, and container security
+- **🛡️ Compliance Automation**: SOC 2, PCI DSS, HIPAA, and custom policies
+- **🔧 Auto-Remediation**: Intelligent fix suggestions and automated patching
+- **📊 Security Metrics**: Real-time dashboards and reporting
+- **🔐 Secret Management**: Azure Key Vault integration and secret scanning
+
+### Azure DevOps Integration
+- **📋 Pipeline Templates**: Ready-to-use YAML templates with security gates
+- **🔄 Automated Workflows**: CI/CD security integration
+- **📈 Dashboard Integration**: Security metrics in Azure DevOps
+- **🚪 Quality Gates**: Automated security approval processes
+
+### Modern Architecture
+- **🐍 Python 3.8+**: Modern Python with type hints
+- **⚡ Async Support**: High-performance async operations
+- **🧩 Plugin System**: Extensible architecture
+- **📦 Easy Integration**: Simple pip install and configuration
+- **🎯 CLI Tools**: Command-line interface for all operations
+
+## 📦 Installation
+
+```bash
+# Install the core library
+pip install secureflow-core
+
+# Install with development dependencies
+pip install secureflow-core[dev]
+
+# Install with documentation dependencies
+pip install secureflow-core[docs]
+```
+
+## 🚀 Quick Start
+
+### 1. Basic Setup
+
+```python
+from secureflow_core import SecureFlow, Config
+
+# Initialize with default configuration
+sf = SecureFlow()
+
+# Or with custom configuration
+config = Config(
+    azure_tenant_id="your-tenant-id",
+    azure_client_id="your-client-id",
+    azure_subscription_id="your-subscription-id"
+)
+sf = SecureFlow(config)
+```
+
+### 2. Security Scanning
+
+```python
+# Scan source code for vulnerabilities
+results = await sf.scan.source_code("./src")
+
+# Scan dependencies
+dependency_results = await sf.scan.dependencies("requirements.txt")
+
+# Scan Docker images
+container_results = await sf.scan.container("myapp:latest")
+
+# Generate security report
+report = sf.report.generate(results, dependency_results, container_results)
+```
+
+### 3. Azure DevOps Integration
+
+```python
+# Create security pipeline
+pipeline = sf.azure.create_security_pipeline(
+    project="MyProject",
+    repository="MyRepo",
+    template="comprehensive-security"
+)
+
+# Add security gates
+sf.azure.add_security_gate(
+    pipeline_id=pipeline.id,
+    stage="production",
+    policies=["high-severity-block", "compliance-check"]
+)
+```
+
+### 4. CLI Usage
+
+```bash
+# Initialize in a repository
+secureflow init
+
+# Run security scan
+secureflow scan --all
+
+# Generate compliance report
+secureflow report --format json --output compliance.json
+
+# Deploy Azure DevOps templates
+secureflow azure deploy-templates --project MyProject
+```
+
+## 🏗️ Azure DevOps Pipeline Integration
+
+### Example Pipeline Template
+
+```yaml
+# azure-pipelines.yml
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - template: variables/security-vars.yml
+
+stages:
+  - template: templates/security-scan-stage.yml
+  - template: templates/build-stage.yml
+  - template: templates/security-test-stage.yml
+  - template: templates/deploy-stage.yml
+```
+
+### Security Scan Stage Template
+
+```yaml
+# templates/security-scan-stage.yml
+parameters:
+  - name: scanTypes
+    type: object
+    default:
+      - sast
+      - dast
+      - sca
+      - secrets
+
+stages:
+- stage: SecurityScan
+  displayName: 'Security Scanning'
+  jobs:
+  - job: SecurityAnalysis
+    displayName: 'Security Analysis'
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        
+    - script: |
+        pip install secureflow-core
+        secureflow scan --types ${{ join(',', parameters.scanTypes) }}
+      displayName: 'Run Security Scans'
+      
+    - task: PublishTestResults@2
+      inputs:
+        testResultsFiles: 'security-results.xml'
+        testRunTitle: 'Security Scan Results'
+```
+
+## 📖 Documentation
+
+### Configuration
+
+```python
+# config.py or environment variables
+SECUREFLOW_CONFIG = {
+    "azure": {
+        "tenant_id": "your-tenant-id",
+        "client_id": "your-client-id",
+        "subscription_id": "your-subscription-id"
+    },
+    "scanning": {
+        "tools": {
+            "sast": "semgrep",
+            "dast": "zap",
+            "sca": "safety"
+        },
+        "severity_threshold": "medium",
+        "fail_on_high": True
+    },
+    "compliance": {
+        "frameworks": ["SOC2", "PCI_DSS"],
+        "custom_policies": "./policies/"
+    }
+}
+```
+
+### Plugin Development
+
+```python
+from secureflow_core.plugins import BasePlugin
+
+class CustomScannerPlugin(BasePlugin):
+    name = "custom-scanner"
+    version = "1.0.0"
+    
+    async def scan(self, target: str) -> ScanResult:
+        # Implement your custom scanning logic
+        return ScanResult(
+            tool=self.name,
+            target=target,
+            vulnerabilities=vulnerabilities
+        )
+```
+
+## 🛠️ Development
+
+### Setup Development Environment
+
+```bash
+# Clone the repository
+git clone https://github.com/codevibe/secureflow-core.git
+cd secureflow-core
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install in development mode
+pip install -e .[dev]
+
+# Install pre-commit hooks
+pre-commit install
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=secureflow_core
+
+# Run specific test file
+pytest tests/test_scanner.py
+```
+
+### Code Quality
+
+```bash
+# Format code
+black src/ tests/
+
+# Sort imports
+isort src/ tests/
+
+# Lint code
+flake8 src/ tests/
+
+# Type checking
+mypy src/
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🔗 Related Projects
+
+- [Azure DevOps CLI](https://docs.microsoft.com/en-us/azure/devops/cli/)
+- [Microsoft Security DevOps](https://github.com/microsoft/security-devops)
+- [Azure Security Center](https://azure.microsoft.com/en-us/services/security-center/)
+
+## 📞 Support
+
+- 📧 Email: support@codevibe.com
+- 💬 Discussions: [GitHub Discussions](https://github.com/codevibe/secureflow-core/discussions)
+- 🐛 Issues: [GitHub Issues](https://github.com/codevibe/secureflow-core/issues)
+
+---
+
+Made with ❤️ by the CodeVibe Team

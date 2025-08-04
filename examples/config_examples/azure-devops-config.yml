@@ -1,0 +1,90 @@
+# SecureFlow Configuration with Azure DevOps Integration
+
+# General settings
+log_level: "INFO"
+output_format: "json"
+cache_enabled: true
+
+# Azure DevOps configuration
+azure:
+  devops_organization: "your-org-name"
+  # Note: Use environment variables for sensitive values:
+  # AZURE_DEVOPS_PAT, AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+  tenant_id: "${AZURE_TENANT_ID}"
+  client_id: "${AZURE_CLIENT_ID}"
+  client_secret: "${AZURE_CLIENT_SECRET}"
+  subscription_id: "${AZURE_SUBSCRIPTION_ID}"
+  resource_group: "security-rg"
+  pat_token: "${AZURE_DEVOPS_PAT}"
+  key_vault_url: "https://your-keyvault.vault.azure.net/"
+
+# Enhanced scanning configuration for Azure
+scanning:
+  enable_sast: true
+  enable_sca: true
+  enable_secrets: true
+  enable_iac: true
+  enable_container: true
+  
+  # Tool selection optimized for Azure DevOps
+  sast_tool: "semgrep"
+  sca_tool: "safety"
+  secrets_tool: "truffhog"
+  iac_tool: "checkov"
+  container_tool: "trivy"
+  
+  # Stricter settings for production
+  severity_threshold: "low"
+  fail_on_high: true
+  fail_on_critical: true
+  
+  exclude_paths:
+    - ".git"
+    - ".azure-pipelines"
+    - "node_modules"
+    - ".venv"
+    - "__pycache__"
+    - "*.log"
+    - "temp/"
+
+# Compliance frameworks for enterprise
+compliance:
+  frameworks:
+    - "SOC2"
+    - "PCI_DSS"
+  generate_reports: true
+  report_format: "json"
+
+# Notifications for team collaboration
+notifications:
+  enable_email: true
+  enable_teams: true
+  
+  email_recipients:
+    - "security-team@company.com"
+    - "devops-team@company.com"
+  
+  teams_webhook: "${TEAMS_WEBHOOK_URL}"
+  
+  notify_on_high: true
+  notify_on_critical: true
+  notify_on_compliance_fail: true
+
+# Performance tuning for CI/CD
+max_concurrent_scans: 6
+scan_timeout: 2400  # 40 minutes
+
+# Plugin configuration
+plugins:
+  microsoft-security-devops:
+    enabled: true
+    categories:
+      - "secrets"
+      - "code"
+      - "artifacts"
+      - "IaC"
+  
+  sonarqube:
+    enabled: false  # Enable if you have SonarQube server
+    server_url: "${SONARQUBE_URL}"
+    token: "${SONARQUBE_TOKEN}"

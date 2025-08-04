@@ -1,0 +1,255 @@
+# SecureFlow Comprehensive Security Pipeline
+# Advanced security pipeline with all security checks and compliance reporting
+# Usage: Include this template for complete security coverage
+
+parameters:
+- name: repository_path
+  type: string
+  default: '$(Build.SourcesDirectory)'
+- name: python_version
+  type: string
+  default: '3.11'
+- name: container_image
+  type: string
+  default: ''
+- name: compliance_frameworks
+  type: object
+  default: ['PCI-DSS', 'SOC2']
+- name: notification_email
+  type: string
+  default: 'security@company.com'
+
+variables:
+  SECUREFLOW_CONFIG: '$(Build.SourcesDirectory)/.secureflow.yaml'
+
+stages:
+- stage: PreSecurityScan
+  displayName: 'Pre-Security Setup'
+  jobs:
+  - job: Setup
+    displayName: 'Security Scan Setup'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '${{ parameters.python_version }}'
+        addToPath: true
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install secureflow-core[all]
+      displayName: 'Install SecureFlow with all extensions'
+
+    - script: |
+        secureflow init --project-type comprehensive
+      displayName: 'Initialize SecureFlow Configuration'
+
+- stage: StaticAnalysis
+  displayName: 'Static Security Analysis'
+  dependsOn: PreSecurityScan
+  jobs:
+  - job: SAST
+    displayName: 'Static Application Security Testing'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - template: ./steps/setup-secureflow.yml
+    
+    - script: |
+        secureflow scan sast ${{ parameters.repository_path }} \
+          --tool semgrep \
+          --rules auto \
+          --output-format json \
+          --output-file $(Agent.TempDirectory)/sast-results.json \
+          --severity-threshold medium
+      displayName: 'SAST Scan with Semgrep'
+
+    - script: |
+        secureflow scan sast ${{ parameters.repository_path }} \
+          --tool bandit \
+          --output-format json \
+          --output-file $(Agent.TempDirectory)/bandit-results.json
+      displayName: 'Python Security with Bandit'
+      condition: and(succeeded(), contains(variables['Build.SourcesDirectory'], '.py'))
+
+  - job: SCA
+    displayName: 'Software Composition Analysis'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - template: ./steps/setup-secureflow.yml
+
+    - script: |
+        secureflow scan sca ${{ parameters.repository_path }} \
+          --tool safety \
+          --output-format json \
+          --output-file $(Agent.TempDirectory)/sca-results.json \
+          --check-dependencies
+      displayName: 'Dependency Vulnerability Scan'
+
+    - script: |
+        secureflow scan licenses ${{ parameters.repository_path }} \
+          --output-format json \
+          --output-file $(Agent.TempDirectory)/license-results.json \
+          --allowed-licenses MIT,Apache-2.0,BSD-3-Clause
+      displayName: 'License Compliance Check'
+
+  - job: SecretsDetection
+    displayName: 'Secrets Detection'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - template: ./steps/setup-secureflow.yml
+
+    - script: |
+        secureflow scan secrets ${{ parameters.repository_path }} \
+          --tool trufflehog \
+          --output-format json \
+          --output-file $(Agent.TempDirectory)/secrets-results.json \
+          --exclude-patterns .secureflow-ignore
+      displayName: 'Secrets Scanning with TruffleHog'
+
+- stage: InfrastructureSecurity
+  displayName: 'Infrastructure Security'
+  dependsOn: PreSecurityScan
+  condition: or(contains(variables['Build.SourcesDirectory'], 'terraform'), contains(variables['Build.SourcesDirectory'], 'cloudformation'))
+  jobs:
+  - job: IaC
+    displayName: 'Infrastructure as Code Security'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - template: ./steps/setup-secureflow.yml
+
+    - script: |
+        secureflow scan iac ${{ parameters.repository_path }} \
+          --tool checkov \
+          --output-format json \
+          --output-file $(Agent.TempDirectory)/iac-results.json \
+          --framework terraform,cloudformation
+      displayName: 'IaC Security Scan'
+
+- stage: ContainerSecurity
+  displayName: 'Container Security'
+  dependsOn: PreSecurityScan
+  condition: ne('${{ parameters.container_image }}', '')
+  jobs:
+  - job: ContainerScan
+    displayName: 'Container Image Security'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - template: ./steps/setup-secureflow.yml
+
+    - script: |
+        secureflow scan container ${{ parameters.container_image }} \
+          --tool trivy \
+          --output-format json \
+          --output-file $(Agent.TempDirectory)/container-results.json \
+          --severity HIGH,CRITICAL
+      displayName: 'Container Image Vulnerability Scan'
+
+- stage: SecurityReporting
+  displayName: 'Security Reporting & Compliance'
+  dependsOn: [StaticAnalysis, InfrastructureSecurity, ContainerSecurity]
+  condition: always()
+  jobs:
+  - job: GenerateReports
+    displayName: 'Generate Security Reports'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - template: ./steps/setup-secureflow.yml
+
+    - script: |
+        secureflow report generate \
+          --input $(Agent.TempDirectory)/*-results.json \
+          --format html,json,sarif \
+          --output-dir $(Agent.TempDirectory)/reports \
+          --include-charts \
+          --include-metrics
+      displayName: 'Generate Security Reports'
+
+    - ${{ each framework in parameters.compliance_frameworks }}:
+      - script: |
+          secureflow compliance check \
+            --framework ${{ framework }} \
+            --input $(Agent.TempDirectory)/*-results.json \
+            --output $(Agent.TempDirectory)/reports/${{ framework }}-compliance.json
+        displayName: 'Generate ${{ framework }} Compliance Report'
+
+    - task: PublishTestResults@2
+      inputs:
+        testResultsFormat: 'SARIF'
+        testResultsFiles: '$(Agent.TempDirectory)/reports/*.sarif'
+        mergeTestResults: true
+        failTaskOnFailedTests: true
+      displayName: 'Publish SARIF Results'
+
+    - task: PublishHtmlReport@1
+      inputs:
+        reportDir: '$(Agent.TempDirectory)/reports'
+        tabName: 'Security Dashboard'
+      displayName: 'Publish Security Dashboard'
+
+  - job: SecurityWorkItems
+    displayName: 'Create Security Work Items'
+    dependsOn: GenerateReports
+    condition: succeededOrFailed()
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - template: ./steps/setup-secureflow.yml
+
+    - script: |
+        secureflow azure create-work-items \
+          --input $(Agent.TempDirectory)/*-results.json \
+          --severity high,critical \
+          --project $(System.TeamProject) \
+          --area-path "Security/Vulnerabilities" \
+          --iteration $(System.TeamProject)\Sprint \
+          --assign-to "${{ parameters.notification_email }}"
+      displayName: 'Create Work Items for High/Critical Issues'
+      env:
+        AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)
+
+    - script: |
+        secureflow azure update-dashboard \
+          --project $(System.TeamProject) \
+          --dashboard "Security Overview" \
+          --input $(Agent.TempDirectory)/reports/*.json
+      displayName: 'Update Security Dashboard'
+      env:
+        AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)
+
+- stage: SecurityNotification
+  displayName: 'Security Notifications'
+  dependsOn: SecurityReporting
+  condition: always()
+  jobs:
+  - job: NotifyTeam
+    displayName: 'Send Security Notifications'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        # Send email notification with security summary
+        secureflow notify email \
+          --recipients "${{ parameters.notification_email }}" \
+          --subject "Security Scan Results - Build $(Build.BuildNumber)" \
+          --template security-summary \
+          --input $(Agent.TempDirectory)/reports/*.json
+      displayName: 'Send Email Notification'
+      condition: always()
+
+    - script: |
+        # Post to Slack/Teams if configured
+        secureflow notify teams \
+          --webhook $(TEAMS_WEBHOOK_URL) \
+          --template security-summary \
+          --input $(Agent.TempDirectory)/reports/*.json
+      displayName: 'Send Teams Notification'
+      condition: and(always(), ne(variables['TEAMS_WEBHOOK_URL'], ''))
+      env:
+        TEAMS_WEBHOOK_URL: $(TEAMS_WEBHOOK_URL)

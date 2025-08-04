@@ -1,0 +1,125 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secureflow-core"
+version = "1.0.0"
+description = "A comprehensive shared DevSecOps library for Azure DevOps and modern security automation"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "CodeVibe Team", email = "devops@codevibe.com"}
+]
+keywords = ["devsecops", "security", "azure-devops", "automation", "vulnerability-scanning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules"
+]
+requires-python = ">=3.8"
+dependencies = [
+    "requests>=2.31.0",
+    "pyyaml>=6.0",
+    "click>=8.1.0",
+    "azure-devops>=7.1.0b4",
+    "azure-identity>=1.15.0",
+    "azure-keyvault-secrets>=4.7.0",
+    "azure-mgmt-security>=6.0.0",
+    "jinja2>=3.1.0",
+    "pydantic>=2.5.0",
+    "rich>=13.7.0",
+    "typer>=0.9.0",
+    "httpx>=0.26.0",
+    "python-dotenv>=1.0.0",
+    "semver>=3.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.9.0",
+    "isort>=5.12.0",
+    "flake8>=6.1.0",
+    "mypy>=1.6.0",
+    "pre-commit>=3.5.0",
+    "bandit>=1.7.5"
+]
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.4.0",
+    "mkdocstrings[python]>=0.23.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/codevibe/secureflow-core"
+Repository = "https://github.com/codevibe/secureflow-core.git"
+Documentation = "https://secureflow-core.readthedocs.io"
+Issues = "https://github.com/codevibe/secureflow-core/issues"
+
+[project.scripts]
+secureflow = "secureflow_core.cli:main"
+sf = "secureflow_core.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["secureflow_core*"]
+
+[tool.setuptools.package-data]
+secureflow_core = ["templates/**/*", "configs/**/*", "schemas/**/*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+known_first_party = ["secureflow_core"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_functions = ["test_*"]
+addopts = "--cov=secureflow_core --cov-report=term-missing --cov-report=xml"
+
+[tool.coverage.run]
+source = ["src/secureflow_core"]
+omit = ["tests/*", "src/secureflow_core/__main__.py"]
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+skips = ["B101", "B601"]

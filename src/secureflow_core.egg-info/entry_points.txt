@@ -1,0 +1,3 @@
+[console_scripts]
+secureflow = secureflow_core.cli:main
+sf = secureflow_core.cli:main
