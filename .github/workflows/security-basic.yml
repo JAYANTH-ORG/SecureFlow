@@ -233,7 +233,7 @@ jobs:
         retention-days: 30
 
     - name: 💬 Comment on PR
-      if: github.event_name == 'pull_request' && always()
+      if: ${{ github.event_name == 'pull_request' && always() }}
       uses: actions/github-script@v6
       with:
         script: |

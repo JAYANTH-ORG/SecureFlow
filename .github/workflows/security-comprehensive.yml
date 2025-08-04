@@ -327,7 +327,7 @@ jobs:
     name: 🐳 Container Security
     runs-on: ubuntu-latest
     needs: pre-security-setup
-    if: github.event.inputs.container_image != '' || hashFiles('Dockerfile', 'docker-compose.yml') != ''
+    if: ${{ github.event.inputs.container_image != '' || hashFiles('Dockerfile', 'docker-compose.yml') != '' }}
     
     permissions:
       security-events: write
@@ -350,13 +350,13 @@ jobs:
         sudo apt-get install trivy
 
     - name: 🔍 Dockerfile Security Scan
-      if: hashFiles('Dockerfile') != ''
+      if: ${{ hashFiles('Dockerfile') != '' }}
       run: |
         echo "🔍 Scanning Dockerfile for security issues..."
         trivy config --format json --output dockerfile-scan.json . || true
 
     - name: 🏗️ Build Container Image
-      if: hashFiles('Dockerfile') != ''
+      if: ${{ hashFiles('Dockerfile') != '' }}
       run: |
         IMAGE_NAME="${{ github.repository }}:${{ github.sha }}"
         echo "🏗️ Building container image: $IMAGE_NAME"
