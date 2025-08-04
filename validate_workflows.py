@@ -67,12 +67,19 @@ def check_matrix_syntax(content, file_path):
     
     # Look for matrix configurations
     if 'matrix:' in content:
-        # Check for common JSON formatting issues in shell commands
-        if 'printf' in content and 'jq' in content:
-            # Look for potentially problematic printf patterns
-            if 'printf \'"%s"\\n\'' in content:
-                line_num = content[:content.find('printf \'"%s"\\n\'')].count('\n') + 1
-                issues.append(f"Line {line_num}: Potentially malformed JSON in matrix generation - use jq -R . instead")
+        # Check for any jq usage that could cause issues
+        if 'jq -c .' in content:
+            line_num = content[:content.find('jq -c .')].count('\n') + 1
+            issues.append(f"Line {line_num}: Using 'jq -c .' for JSON compaction - consider removing if JSON is already valid")
+        
+        if 'jq -R . | jq -s .' in content:
+            line_num = content[:content.find('jq -R . | jq -s .')].count('\n') + 1
+            issues.append(f"Line {line_num}: Complex jq pipeline - consider manual JSON generation for better reliability")
+        
+        # Check for potentially problematic printf patterns
+        if 'printf \'"%s"\\n\'' in content:
+            line_num = content[:content.find('printf \'"%s"\\n\'')].count('\n') + 1
+            issues.append(f"Line {line_num}: Potentially malformed JSON in matrix generation - double quotes issue")
     
     return issues
 

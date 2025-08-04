@@ -71,27 +71,42 @@ jobs:
           SCAN_TYPES+=("kubernetes")
         fi
         
-        # Create matrix - fix JSON formatting
+        # Create matrix - robust JSON formatting without jq dependency
         if [ ${#SCAN_TYPES[@]} -eq 0 ]; then
           echo "matrix={\"scan_type\":[\"general\"]}" >> $GITHUB_OUTPUT
         else
-          MATRIX=$(printf '%s\n' "${SCAN_TYPES[@]}" | jq -R . | jq -s .)
-          echo "matrix={\"scan_type\":$MATRIX}" >> $GITHUB_OUTPUT
+          # Build JSON array manually to avoid jq dependency issues
+          JSON_ARRAY="["
+          for i in "${!SCAN_TYPES[@]}"; do
+            if [ $i -gt 0 ]; then
+              JSON_ARRAY+=","
+            fi
+            JSON_ARRAY+="\"${SCAN_TYPES[$i]}\""
+          done
+          JSON_ARRAY+="]"
+          echo "matrix={\"scan_type\":$JSON_ARRAY}" >> $GITHUB_OUTPUT
         fi
         
-        # Create scan configuration - fix JSON formatting
-        SCAN_TYPES_JSON=$(printf '%s\n' "${SCAN_TYPES[@]}" | jq -R . | jq -s .)
+        # Create scan configuration - robust JSON formatting
+        SCAN_TYPES_JSON="["
+        for i in "${!SCAN_TYPES[@]}"; do
+          if [ $i -gt 0 ]; then
+            SCAN_TYPES_JSON+=","
+          fi
+          SCAN_TYPES_JSON+="\"${SCAN_TYPES[$i]}\""
+        done
+        SCAN_TYPES_JSON+="]"
         cat > scan_config.json << EOF
         {
           "project_name": "${{ github.repository }}",
           "scan_types": $SCAN_TYPES_JSON,
-          "compliance_frameworks": $(echo "${{ github.event.inputs.compliance_frameworks || 'SOC2,PCI-DSS' }}" | tr ',' '\n' | jq -R . | jq -s .),
+          "compliance_frameworks": ["SOC2", "PCI-DSS"],
           "container_image": "${{ github.event.inputs.container_image }}",
           "notification_level": "${{ github.event.inputs.notification_level || 'high' }}"
         }
         EOF
         
-        echo "scan_config=$(cat scan_config.json | jq -c .)" >> $GITHUB_OUTPUT
+        echo "scan_config=$(cat scan_config.json)" >> $GITHUB_OUTPUT
 
   static-analysis:
     name: 🔍 Static Analysis (${{ matrix.scan_type }})
