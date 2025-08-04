@@ -139,10 +139,15 @@ jobs:
       continue-on-error: true
 
     - name: 🐳 Run Container Security Scan
-      if: (github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'container') && hashFiles('**/Dockerfile', '**/docker-compose.yml') != ''
+      if: github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'container'
       run: |
         echo "🐳 Running Container Security Scan..."
-        if [ -f "Dockerfile" ]; then
+        HAS_CONTAINER_FILES="false"
+        if [ -f "Dockerfile" ] || [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ]; then
+          HAS_CONTAINER_FILES="true"
+        fi
+        
+        if [ "$HAS_CONTAINER_FILES" = "true" ]; then
           # Build image for scanning
           docker build -t ${{ github.repository }}:${{ github.sha }} .
           

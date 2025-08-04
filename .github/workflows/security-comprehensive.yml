@@ -323,11 +323,34 @@ jobs:
           tfsec-*.json
         retention-days: 30
 
+  check-container-files:
+    name: � Check Container Files
+    runs-on: ubuntu-latest
+    needs: pre-security-setup
+    outputs:
+      has-docker-files: ${{ steps.check.outputs.has-docker-files }}
+    steps:
+    - name: 🔄 Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Check for container files
+      id: check
+      run: |
+        HAS_DOCKER_FILES="false"
+        if [ -f "Dockerfile" ] || [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ] || find . -name "Dockerfile" -o -name "docker-compose.*" | grep -q .; then
+          HAS_DOCKER_FILES="true"
+        fi
+        if [ "${{ github.event.inputs.container_image }}" != "" ]; then
+          HAS_DOCKER_FILES="true"
+        fi
+        echo "has-docker-files=$HAS_DOCKER_FILES" >> $GITHUB_OUTPUT
+        echo "🐳 Container files detected: $HAS_DOCKER_FILES"
+
   container-security:
     name: 🐳 Container Security
     runs-on: ubuntu-latest
-    needs: pre-security-setup
-    if: github.event.inputs.container_image != '' || hashFiles('**/Dockerfile', '**/docker-compose.yml') != ''
+    needs: [pre-security-setup, check-container-files]
+    if: needs.check-container-files.outputs.has-docker-files == 'true'
     
     permissions:
       security-events: write
@@ -350,18 +373,28 @@ jobs:
         sudo apt-get install trivy
 
     - name: 🔍 Dockerfile Security Scan
-      if: hashFiles('**/Dockerfile') != ''
       run: |
         echo "🔍 Scanning Dockerfile for security issues..."
-        trivy config --format json --output dockerfile-scan.json . || true
+        if [ -f "Dockerfile" ]; then
+          trivy config --format json --output dockerfile-scan.json . || true
+        else
+          echo "No Dockerfile found in root directory"
+        fi
 
     - name: 🏗️ Build Container Image
-      if: hashFiles('**/Dockerfile') != ''
       run: |
-        IMAGE_NAME="${{ github.repository }}:${{ github.sha }}"
-        echo "🏗️ Building container image: $IMAGE_NAME"
-        docker build -t "$IMAGE_NAME" .
-        echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+        if [ -f "Dockerfile" ]; then
+          IMAGE_NAME="${{ github.repository }}:${{ github.sha }}"
+          echo "🏗️ Building container image: $IMAGE_NAME"
+          docker build -t "$IMAGE_NAME" .
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+        elif [ "${{ github.event.inputs.container_image }}" != "" ]; then
+          IMAGE_NAME="${{ github.event.inputs.container_image }}"
+          echo "Using provided container image: $IMAGE_NAME"
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+        else
+          echo "No Dockerfile or container image specified"
+        fi
 
     - name: 🐳 Container Image Security Scan
       run: |

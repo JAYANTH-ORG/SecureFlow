@@ -48,24 +48,30 @@ jobs:
       uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
 
     - name: Scan Dockerfile
-      if: hashFiles('**/Dockerfile') != ''
       run: |
         echo "🔍 Scanning Dockerfile for security issues..."
-        secureflow scan iac . \
-          --tool checkov \
-          --framework dockerfile \
-          --output-format json \
-          --output-file dockerfile-scan.json
+        if [ -f "Dockerfile" ]; then
+          secureflow scan iac . \
+            --tool checkov \
+            --framework dockerfile \
+            --output-format json \
+            --output-file dockerfile-scan.json
+        else
+          echo "No Dockerfile found"
+        fi
       continue-on-error: true
 
     - name: Build container image
-      if: hashFiles('**/Dockerfile') != ''
       run: |
-        IMAGE_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-        echo "🏗️ Building container image: $IMAGE_TAG"
-        
-        docker build -t "$IMAGE_TAG" .
-        echo "BUILT_IMAGE=$IMAGE_TAG" >> $GITHUB_ENV
+        if [ -f "Dockerfile" ]; then
+          IMAGE_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo "🏗️ Building container image: $IMAGE_TAG"
+          
+          docker build -t "$IMAGE_TAG" .
+          echo "BUILT_IMAGE=$IMAGE_TAG" >> $GITHUB_ENV
+        else
+          echo "No Dockerfile found for building"
+        fi
 
     - name: Scan container image
       run: |
