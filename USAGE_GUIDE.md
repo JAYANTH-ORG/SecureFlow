@@ -1,15 +1,17 @@
 # SecureFlow-Core Usage Guide
 
-This comprehensive guide provides step-by-step instructions for using SecureFlow-Core in various scenarios, from basic security scanning to advanced Azure DevOps integration.
+This comprehensive guide provides step-by-step instructions for using SecureFlow-Core in various scenarios, from basic security scanning to advanced Azure DevOps and GitHub Actions integration.
 
 ## 📋 Table of Contents
 
 1. [Quick Start](#quick-start)
 2. [Basic Usage Scenarios](#basic-usage-scenarios)
 3. [Azure DevOps Integration](#azure-devops-integration)
-4. [Advanced Use Cases](#advanced-use-cases)
-5. [Custom Plugin Development](#custom-plugin-development)
-6. [Troubleshooting](#troubleshooting)
+4. [GitHub Actions Integration](#github-actions-integration)
+5. [Advanced Use Cases](#advanced-use-cases)
+6. [Custom Plugin Development](#custom-plugin-development)
+7. [Troubleshooting](#troubleshooting)
+7. [GitHub Actions Integration](#github-actions-integration)
 
 ---
 
@@ -1383,3 +1385,426 @@ For additional help:
 ---
 
 This usage guide covers the most common scenarios for using SecureFlow-Core in real-world applications. Each example includes complete, working code that you can adapt to your specific needs.
+
+---
+
+## 🐙 GitHub Actions Integration
+
+### Scenario 5: Basic GitHub Actions Pipeline Integration
+
+**Use Case**: Add security scanning to your GitHub repository with automated SARIF upload and PR comments.
+
+#### Step 1: Setup Basic Security Workflow
+
+Create `.github/workflows/security.yml`:
+
+```yaml
+name: 🛡️ Security Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+
+jobs:
+  security:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    
+    permissions:
+      security-events: write
+      contents: read
+      pull-requests: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup SecureFlow
+      uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
+      with:
+        python-version: '3.11'
+        install-tools: 'true'
+
+    - name: Run security scans
+      run: |
+        secureflow scan all . \
+          --output-format sarif \
+          --output-file security-results.sarif \
+          --include-metrics
+
+    - name: Upload SARIF results
+      if: always()
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: security-results.sarif
+
+    - name: Comment on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const comment = `## 🛡️ Security Scan Results
+          
+          Security scan completed! Check the Security tab for detailed results.
+          `;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+```
+
+#### Step 2: Language-Specific Security Workflow
+
+For Python projects, create `.github/workflows/python-security.yml`:
+
+```yaml
+name: 🐍 Python Security
+
+on:
+  push:
+    paths: ['**.py', 'requirements*.txt', 'pyproject.toml']
+  pull_request:
+    paths: ['**.py', 'requirements*.txt', 'pyproject.toml']
+
+jobs:
+  python-security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install secureflow-core
+
+    - name: Run Python SAST
+      run: |
+        secureflow scan sast . \
+          --tool semgrep \
+          --rules "p/python" \
+          --output-format json \
+          --output-file semgrep-results.json
+
+    - name: Run dependency scan
+      run: |
+        secureflow scan sca . \
+          --tool safety \
+          --output-format json \
+          --output-file safety-results.json
+
+    - name: Upload results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-security-results
+        path: '*-results.json'
+```
+
+#### Step 3: Container Security Workflow
+
+For container projects, create `.github/workflows/container-security.yml`:
+
+```yaml
+name: 🐳 Container Security
+
+on:
+  push:
+    paths: ['Dockerfile*', 'docker-compose*.yml']
+  pull_request:
+    paths: ['Dockerfile*', 'docker-compose*.yml']
+
+jobs:
+  container-security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup SecureFlow
+      uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
+
+    - name: Build container image
+      run: |
+        docker build -t myapp:latest .
+
+    - name: Scan container image
+      run: |
+        secureflow scan container myapp:latest \
+          --tool trivy \
+          --output-format sarif \
+          --output-file container-results.sarif
+
+    - name: Upload SARIF
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: container-results.sarif
+```
+
+### Scenario 6: Comprehensive Multi-Language Security Matrix
+
+**Use Case**: Run security scans across multiple languages and environments with parallel execution.
+
+#### Step 1: Matrix Strategy Workflow
+
+Create `.github/workflows/security-comprehensive.yml`:
+
+```yaml
+name: 🛡️ Comprehensive Security
+
+on:
+  schedule:
+    - cron: '0 3 * * 0'  # Weekly on Sundays
+  workflow_dispatch:
+    inputs:
+      scan_types:
+        description: 'Scan types to run'
+        required: false
+        default: 'python,javascript,container'
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.setup.outputs.matrix }}
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup scan matrix
+      id: setup
+      run: |
+        SCAN_TYPES=()
+        
+        # Detect project types
+        if ls *.py 2>/dev/null || [ -f "requirements.txt" ]; then
+          SCAN_TYPES+=("python")
+        fi
+        
+        if [ -f "package.json" ]; then
+          SCAN_TYPES+=("javascript")
+        fi
+        
+        if [ -f "Dockerfile" ]; then
+          SCAN_TYPES+=("container")
+        fi
+        
+        MATRIX=$(printf '%s\n' "${SCAN_TYPES[@]}" | jq -R . | jq -s .)
+        echo "matrix={\"scan_type\":$MATRIX}" >> $GITHUB_OUTPUT
+
+  security-scan:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.matrix != '{"scan_type":[]}'
+
+    strategy:
+      matrix: ${{fromJson(needs.detect-changes.outputs.matrix)}}
+      fail-fast: false
+    
+    runs-on: ubuntu-latest
+    name: Security (${{ matrix.scan_type }})
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup SecureFlow
+      uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
+
+    - name: Run ${{ matrix.scan_type }} security scan
+      run: |
+        case "${{ matrix.scan_type }}" in
+          python)
+            secureflow scan sast . --tool semgrep --rules "p/python"
+            secureflow scan sca . --tool safety
+            ;;
+          javascript)
+            secureflow scan sast . --tool semgrep --rules "p/javascript"
+            npm audit --audit-level moderate || true
+            ;;
+          container)
+            docker build -t test-image .
+            secureflow scan container test-image --tool trivy
+            ;;
+        esac
+      continue-on-error: true
+
+    - name: Upload scan results
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-results-${{ matrix.scan_type }}
+        path: '*-results.*'
+
+  generate-report:
+    needs: security-scan
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download all results
+      uses: actions/download-artifact@v3
+      with:
+        path: scan-results/
+
+    - name: Setup SecureFlow
+      uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
+
+    - name: Generate comprehensive report
+      run: |
+        secureflow report generate \
+          --input "scan-results/**/*.json" \
+          --format html,json,sarif \
+          --output-dir comprehensive-report \
+          --include-charts \
+          --include-metrics \
+          --title "Comprehensive Security Report"
+
+    - name: Upload comprehensive report
+      uses: actions/upload-artifact@v3
+      with:
+        name: comprehensive-security-report
+        path: comprehensive-report/
+
+    - name: Deploy to GitHub Pages
+      if: github.ref == 'refs/heads/main'
+      uses: actions/upload-pages-artifact@v2
+      with:
+        path: comprehensive-report/
+```
+
+#### Step 2: Compliance and Executive Reporting
+
+Add compliance checking to your workflow:
+
+```yaml
+- name: Generate compliance reports
+  run: |
+    # SOC 2 compliance check
+    secureflow compliance check \
+      --framework SOC2 \
+      --input "scan-results/**/*.json" \
+      --output compliance-soc2.json
+
+    # PCI DSS compliance check
+    secureflow compliance check \
+      --framework PCI-DSS \
+      --input "scan-results/**/*.json" \
+      --output compliance-pci.json
+
+- name: Create security issue for critical findings
+  if: always()
+  uses: actions/github-script@v6
+  with:
+    script: |
+      const fs = require('fs');
+      
+      // Read scan results and check for critical issues
+      let criticalCount = 0;
+      // ... (logic to count critical issues)
+      
+      if (criticalCount > 0) {
+        await github.rest.issues.create({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          title: `🚨 Security Alert: ${criticalCount} Critical Issues Found`,
+          body: `Automated security scan found ${criticalCount} critical security issues.`,
+          labels: ['security', 'critical']
+        });
+      }
+```
+
+### Scenario 7: GitHub Actions with Custom Configuration
+
+**Use Case**: Use custom SecureFlow configuration with GitHub Actions for specific security requirements.
+
+#### Step 1: Custom Configuration Setup
+
+Create `.secureflow.yaml` in your repository:
+
+```yaml
+project:
+  name: "my-github-project"
+  team: "security-team"
+  type: "web-application"
+
+scanning:
+  sast_tool: "semgrep"
+  sca_tool: "safety"
+  secrets_tool: "trufflehog"
+  severity_threshold: "medium"
+  
+  exclude_paths:
+    - ".git/"
+    - ".github/"
+    - "tests/fixtures/"
+    - "docs/"
+
+github:
+  repository: "${{ github.repository }}"
+  create_issues: true
+  comment_on_pr: true
+  upload_sarif: true
+
+reporting:
+  formats: ["html", "sarif", "json"]
+  include_remediation: true
+  include_charts: true
+```
+
+#### Step 2: Workflow with Custom Configuration
+
+```yaml
+name: 🛡️ Custom Security Workflow
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup SecureFlow with custom config
+      uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
+      with:
+        config-file: '.secureflow.yaml'
+        python-version: '3.11'
+
+    - name: Validate configuration
+      run: secureflow config validate
+
+    - name: Run custom security pipeline
+      run: |
+        # Use configuration-driven scanning
+        secureflow scan all . \
+          --config .secureflow.yaml \
+          --parallel \
+          --max-workers 4
+
+    - name: Generate custom reports
+      run: |
+        secureflow report generate \
+          --config .secureflow.yaml \
+          --template custom \
+          --include-executive-summary
+```
+
+---

@@ -1,0 +1,270 @@
+# SecureFlow Basic Security Workflow for GitHub Actions
+# This workflow runs essential security scans on every push and pull request
+
+name: 🛡️ Security Scan (Basic)
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.gitignore'
+  pull_request:
+    branches: [ main, develop ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.gitignore'
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      scan_type:
+        description: 'Type of security scan'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - sast
+          - sca
+          - secrets
+          - container
+
+env:
+  PYTHON_VERSION: '3.11'
+  SECUREFLOW_VERSION: 'latest'
+
+jobs:
+  security-scan:
+    name: 🔍 Security Analysis
+    runs-on: ubuntu-latest
+    
+    permissions:
+      # Required for uploading SARIF results
+      security-events: write
+      # Required for GitHub token
+      contents: read
+      # Required for pull request comments
+      pull-requests: write
+    
+    steps:
+    - name: 🔄 Checkout Code
+      uses: actions/checkout@v4
+      with:
+        # Fetch full history for better analysis
+        fetch-depth: 0
+
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: 📦 Install SecureFlow
+      run: |
+        python -m pip install --upgrade pip
+        pip install secureflow-core
+        
+        # Verify installation
+        secureflow --version
+
+    - name: ⚙️ Initialize SecureFlow
+      run: |
+        # Create basic configuration
+        cat > .secureflow.yaml << EOF
+        project:
+          name: "${{ github.repository }}"
+          description: "GitHub Actions Security Scan"
+          team: "${{ github.repository_owner }}"
+        
+        scanning:
+          sast_tool: "semgrep"
+          sca_tool: "safety"
+          secrets_tool: "trufflehog"
+          severity_threshold: "medium"
+          
+          exclude_paths:
+            - ".git/"
+            - ".github/"
+            - "node_modules/"
+            - "__pycache__/"
+            - "*.pyc"
+            - "*.log"
+            - "test_data/"
+            - "tests/fixtures/"
+        
+        github:
+          repository: "${{ github.repository }}"
+          token: "\${{ secrets.GITHUB_TOKEN }}"
+        
+        reporting:
+          formats: ["json", "sarif"]
+          include_remediation: true
+        EOF
+
+    - name: 🔍 Run SAST (Static Analysis)
+      if: ${{ github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'sast' || github.event.inputs.scan_type == '' }}
+      run: |
+        echo "🔍 Running Static Application Security Testing..."
+        secureflow scan sast . \
+          --tool semgrep \
+          --output-format json \
+          --output-file sast-results.json \
+          --severity-threshold medium
+      continue-on-error: true
+
+    - name: 📦 Run SCA (Dependency Analysis)
+      if: ${{ github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'sca' || github.event.inputs.scan_type == '' }}
+      run: |
+        echo "📦 Running Software Composition Analysis..."
+        secureflow scan sca . \
+          --tool safety \
+          --output-format json \
+          --output-file sca-results.json \
+          --check-dependencies
+      continue-on-error: true
+
+    - name: 🔐 Run Secrets Detection
+      if: ${{ github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'secrets' || github.event.inputs.scan_type == '' }}
+      run: |
+        echo "🔐 Running Secrets Detection..."
+        secureflow scan secrets . \
+          --tool trufflehog \
+          --output-format json \
+          --output-file secrets-results.json \
+          --exclude-patterns .secureflow-ignore
+      continue-on-error: true
+
+    - name: 🐳 Run Container Security Scan
+      if: ${{ (github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'container') && hashFiles('Dockerfile', 'docker-compose.yml') != '' }}
+      run: |
+        echo "🐳 Running Container Security Scan..."
+        if [ -f "Dockerfile" ]; then
+          # Build image for scanning
+          docker build -t ${{ github.repository }}:${{ github.sha }} .
+          
+          # Scan the built image
+          secureflow scan container ${{ github.repository }}:${{ github.sha }} \
+            --tool trivy \
+            --output-format json \
+            --output-file container-results.json \
+            --severity HIGH,CRITICAL
+        fi
+      continue-on-error: true
+
+    - name: 📊 Generate Security Report
+      if: always()
+      run: |
+        echo "📊 Generating comprehensive security report..."
+        
+        # Combine all scan results
+        secureflow report generate \
+          --input "*-results.json" \
+          --format json,sarif,html \
+          --output-dir security-reports \
+          --include-charts \
+          --include-metrics \
+          --title "Security Scan Report - ${{ github.repository }}"
+
+    - name: 📈 Security Metrics Summary
+      if: always()
+      run: |
+        echo "📈 Security Scan Summary"
+        echo "========================"
+        
+        # Parse and display summary
+        python -c "
+        import json
+        import glob
+        import os
+        
+        total_issues = 0
+        critical_issues = 0
+        high_issues = 0
+        tools_used = set()
+        
+        for file in glob.glob('*-results.json'):
+            if os.path.exists(file) and os.path.getsize(file) > 0:
+                try:
+                    with open(file) as f:
+                        data = json.load(f)
+                        if 'vulnerabilities' in data:
+                            vulns = data['vulnerabilities']
+                            total_issues += len(vulns)
+                            critical_issues += len([v for v in vulns if v.get('severity') == 'critical'])
+                            high_issues += len([v for v in vulns if v.get('severity') == 'high'])
+                            if 'tool' in data:
+                                tools_used.add(data['tool'])
+                except Exception as e:
+                    print(f'Error reading {file}: {e}')
+        
+        print(f'📊 Total Security Issues: {total_issues}')
+        print(f'🔴 Critical Issues: {critical_issues}')
+        print(f'🟠 High Issues: {high_issues}')
+        print(f'🔧 Tools Used: {", ".join(tools_used) if tools_used else "None"}')
+        
+        # Set outputs for other steps
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f'total_issues={total_issues}\n')
+            f.write(f'critical_issues={critical_issues}\n')
+            f.write(f'high_issues={high_issues}\n')
+        "
+      id: metrics
+
+    - name: 📋 Upload SARIF Results
+      if: always()
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: security-reports/
+        category: secureflow-security-scan
+      continue-on-error: true
+
+    - name: 📄 Upload Security Reports
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-reports-${{ github.sha }}
+        path: |
+          security-reports/
+          *-results.json
+        retention-days: 30
+
+    - name: 💬 Comment on PR
+      if: github.event_name == 'pull_request' && always()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const totalIssues = '${{ steps.metrics.outputs.total_issues }}';
+          const criticalIssues = '${{ steps.metrics.outputs.critical_issues }}';
+          const highIssues = '${{ steps.metrics.outputs.high_issues }}';
+          
+          const body = `## 🛡️ Security Scan Results
+          
+          **Scan Summary:**
+          - 📊 Total Issues: ${totalIssues}
+          - 🔴 Critical: ${criticalIssues}
+          - 🟠 High: ${highIssues}
+          
+          ${criticalIssues > 0 ? '⚠️ **Critical security issues found!** Please review before merging.' : ''}
+          ${parseInt(totalIssues) === 0 ? '✅ **No security issues detected!**' : ''}
+          
+          📄 Detailed reports are available in the [workflow artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+          
+          *Powered by SecureFlow-Core*`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });
+
+    - name: ❌ Fail on Critical Issues
+      if: steps.metrics.outputs.critical_issues > 0
+      run: |
+        echo "❌ Critical security issues found!"
+        echo "Please review and fix critical security vulnerabilities before proceeding."
+        exit 1

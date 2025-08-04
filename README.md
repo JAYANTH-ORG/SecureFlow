@@ -3,8 +3,9 @@
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Azure DevOps](https://img.shields.io/badge/Azure_DevOps-Ready-blue.svg)](https://azure.microsoft.com/en-us/services/devops/)
+[![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-Ready-green.svg)](https://github.com/features/actions)
 
-A comprehensive, modern shared DevSecOps library that teams can integrate into any repository for automated security scanning, vulnerability management, compliance checking, and Azure DevOps pipeline integration.
+A comprehensive, modern shared DevSecOps library that teams can integrate into any repository for automated security scanning, vulnerability management, compliance checking, and seamless CI/CD integration with Azure DevOps and GitHub Actions.
 
 ## 🚀 Features
 
@@ -15,11 +16,12 @@ A comprehensive, modern shared DevSecOps library that teams can integrate into a
 - **📊 Security Metrics**: Real-time dashboards and reporting
 - **🔐 Secret Management**: Azure Key Vault integration and secret scanning
 
-### Azure DevOps Integration
-- **📋 Pipeline Templates**: Ready-to-use YAML templates with security gates
-- **🔄 Automated Workflows**: CI/CD security integration
-- **📈 Dashboard Integration**: Security metrics in Azure DevOps
+### CI/CD Platform Integration
+- **📋 Pipeline Templates**: Ready-to-use YAML templates for Azure DevOps and GitHub Actions
+- **🔄 Automated Workflows**: CI/CD security integration for multiple platforms
+- **📈 Dashboard Integration**: Security metrics in Azure DevOps and GitHub Pages
 - **🚪 Quality Gates**: Automated security approval processes
+- **🐙 GitHub Actions**: Comprehensive workflows, reusable actions, and SARIF integration
 
 ### Modern Architecture
 - **🐍 Python 3.8+**: Modern Python with type hints
@@ -270,6 +272,79 @@ Set up these service connections in Azure DevOps:
 1. **Azure Key Vault** - For secret management
 2. **Container Registry** - For container scanning
 3. **External Services** - For third-party integrations
+
+## 🐙 GitHub Actions Integration
+
+SecureFlow provides comprehensive GitHub Actions workflows and reusable actions for seamless CI/CD security integration.
+
+### Quick Setup
+
+1. **Copy a workflow template** to `.github/workflows/` in your repository:
+   - [`github-actions-templates/basic-security.yml`](./github-actions-templates/basic-security.yml) - Essential security scanning
+   - [`github-actions-templates/python-security.yml`](./github-actions-templates/python-security.yml) - Python-specific security
+   - [`github-actions-templates/container-security.yml`](./github-actions-templates/container-security.yml) - Container security
+
+2. **Update the action reference** in your workflow:
+   ```yaml
+   - name: Setup SecureFlow
+     uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
+   ```
+
+3. **Configure repository permissions**:
+   ```yaml
+   permissions:
+     security-events: write  # For SARIF upload
+     contents: read         # For checkout
+     pull-requests: write   # For PR comments
+   ```
+
+### Basic GitHub Actions Workflow
+
+```yaml
+name: 🛡️ Security Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      pull-requests: write
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup SecureFlow
+      uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
+    
+    - name: Run security scans
+      run: |
+        secureflow scan all . \
+          --output-format sarif \
+          --output-file security-results.sarif
+    
+    - name: Upload SARIF results
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: security-results.sarif
+```
+
+### Advanced Features
+
+- **🔄 Matrix scanning** across multiple languages and environments
+- **📊 Executive dashboards** deployed to GitHub Pages
+- **🚨 Automatic issue creation** for critical security findings
+- **💬 PR comments** with security scan summaries
+- **🏗️ Infrastructure scanning** (Terraform, Kubernetes, Docker)
+- **📋 Compliance reporting** (SOC 2, PCI DSS, HIPAA)
+
+For detailed GitHub Actions documentation, see [`github-actions-templates/README.md`](./github-actions-templates/README.md).
 
 ## ⚙️ Configuration
 

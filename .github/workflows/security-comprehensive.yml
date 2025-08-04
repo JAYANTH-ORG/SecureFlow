@@ -1,0 +1,692 @@
+# SecureFlow Comprehensive Security Workflow for GitHub Actions
+# This workflow provides enterprise-grade security scanning with compliance reporting
+
+name: 🛡️ Security Scan (Comprehensive)
+
+on:
+  schedule:
+    # Run comprehensive scans weekly on Sundays at 3 AM UTC
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      compliance_frameworks:
+        description: 'Compliance frameworks to check'
+        required: false
+        default: 'SOC2,PCI-DSS'
+        type: string
+      container_image:
+        description: 'Container image to scan (optional)'
+        required: false
+        type: string
+      notification_level:
+        description: 'Notification level'
+        required: true
+        default: 'high'
+        type: choice
+        options:
+          - all
+          - high
+          - critical
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+
+jobs:
+  pre-security-setup:
+    name: 🔧 Pre-Security Setup
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.setup.outputs.matrix }}
+      scan_config: ${{ steps.setup.outputs.scan_config }}
+    
+    steps:
+    - name: 🔄 Checkout Code
+      uses: actions/checkout@v4
+
+    - name: 🔧 Setup Scan Matrix
+      id: setup
+      run: |
+        # Detect project types and setup scan matrix
+        SCAN_TYPES=()
+        
+        # Check for different project types
+        if ls *.py 2>/dev/null || [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then
+          SCAN_TYPES+=("python")
+        fi
+        
+        if [ -f "package.json" ] || [ -f "yarn.lock" ] || [ -f "package-lock.json" ]; then
+          SCAN_TYPES+=("javascript")
+        fi
+        
+        if [ -f "Dockerfile" ] || [ -f "docker-compose.yml" ]; then
+          SCAN_TYPES+=("container")
+        fi
+        
+        if ls *.tf 2>/dev/null || ls terraform/*.tf 2>/dev/null; then
+          SCAN_TYPES+=("terraform")
+        fi
+        
+        if ls *.yaml 2>/dev/null | grep -E "(k8s|kubernetes)" || [ -d "k8s" ] || [ -d "kubernetes" ]; then
+          SCAN_TYPES+=("kubernetes")
+        fi
+        
+        # Create matrix
+        MATRIX=$(printf '%s\n' "${SCAN_TYPES[@]}" | jq -R . | jq -s .)
+        echo "matrix={\"scan_type\":$MATRIX}" >> $GITHUB_OUTPUT
+        
+        # Create scan configuration
+        cat > scan_config.json << EOF
+        {
+          "project_name": "${{ github.repository }}",
+          "scan_types": $(echo "${SCAN_TYPES[@]}" | jq -R 'split(" ")'),
+          "compliance_frameworks": $(echo "${{ github.event.inputs.compliance_frameworks || 'SOC2,PCI-DSS' }}" | tr ',' '\n' | jq -R . | jq -s .),
+          "container_image": "${{ github.event.inputs.container_image }}",
+          "notification_level": "${{ github.event.inputs.notification_level || 'high' }}"
+        }
+        EOF
+        
+        echo "scan_config=$(cat scan_config.json | jq -c .)" >> $GITHUB_OUTPUT
+
+  static-analysis:
+    name: 🔍 Static Analysis (${{ matrix.scan_type }})
+    runs-on: ubuntu-latest
+    needs: pre-security-setup
+    if: needs.pre-security-setup.outputs.matrix != '{"scan_type":[]}'
+    
+    strategy:
+      fail-fast: false
+      matrix: ${{fromJson(needs.pre-security-setup.outputs.matrix)}}
+    
+    permissions:
+      security-events: write
+      contents: read
+    
+    steps:
+    - name: 🔄 Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: 🟢 Set up Node.js
+      if: matrix.scan_type == 'javascript'
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: 📦 Install SecureFlow
+      run: |
+        python -m pip install --upgrade pip
+        pip install secureflow-core[all]
+
+    - name: ⚙️ Configure SecureFlow
+      run: |
+        cat > .secureflow.yaml << EOF
+        project:
+          name: "${{ github.repository }}"
+          description: "Comprehensive GitHub Actions Security Scan"
+          team: "${{ github.repository_owner }}"
+          type: "${{ matrix.scan_type }}"
+        
+        scanning:
+          sast_tool: "semgrep"
+          sca_tool: "safety"
+          secrets_tool: "trufflehog"
+          iac_tool: "checkov"
+          container_tool: "trivy"
+          severity_threshold: "medium"
+          
+          exclude_paths:
+            - ".git/"
+            - ".github/"
+            - "node_modules/"
+            - "__pycache__/"
+            - "*.pyc"
+            - "*.log"
+            - "test_data/"
+            - "tests/fixtures/"
+            - "vendor/"
+            - ".terraform/"
+        
+        github:
+          repository: "${{ github.repository }}"
+          token: "\${{ secrets.GITHUB_TOKEN }}"
+        
+        reporting:
+          formats: ["json", "sarif", "html"]
+          include_charts: true
+          include_metrics: true
+          include_remediation: true
+        
+        compliance:
+          frameworks: $(echo '${{ needs.pre-security-setup.outputs.scan_config }}' | jq -r '.compliance_frameworks')
+        
+        advanced:
+          parallel_scans: true
+          max_workers: 4
+          scan_timeout: 1800
+        EOF
+
+    - name: 🔍 Run Language-Specific SAST
+      run: |
+        case "${{ matrix.scan_type }}" in
+          python)
+            echo "🐍 Running Python security analysis..."
+            secureflow scan sast . --tool semgrep --rules "p/python"
+            secureflow scan sast . --tool bandit
+            ;;
+          javascript)
+            echo "🟢 Running JavaScript security analysis..."
+            secureflow scan sast . --tool semgrep --rules "p/javascript"
+            if [ -f "package.json" ]; then
+              npm audit --audit-level moderate --json > npm-audit.json 2>/dev/null || true
+            fi
+            ;;
+          terraform)
+            echo "🏗️ Running Terraform security analysis..."
+            secureflow scan iac . --tool checkov --framework terraform
+            ;;
+          kubernetes)
+            echo "☸️ Running Kubernetes security analysis..."
+            secureflow scan iac . --tool checkov --framework kubernetes
+            ;;
+          container)
+            echo "🐳 Running container configuration analysis..."
+            secureflow scan iac . --tool checkov --framework dockerfile
+            ;;
+        esac
+      continue-on-error: true
+
+    - name: 📦 Run Dependency Analysis
+      if: matrix.scan_type == 'python' || matrix.scan_type == 'javascript'
+      run: |
+        case "${{ matrix.scan_type }}" in
+          python)
+            echo "📦 Running Python dependency analysis..."
+            secureflow scan sca . --tool safety
+            secureflow scan sca . --tool pip-audit
+            ;;
+          javascript)
+            echo "📦 Running Node.js dependency analysis..."
+            if [ -f "package.json" ]; then
+              npm audit --audit-level moderate || true
+              # Convert npm audit to SecureFlow format
+              secureflow scan sca . --tool npm-audit
+            fi
+            ;;
+        esac
+      continue-on-error: true
+
+    - name: 🔐 Run Secrets Detection
+      run: |
+        echo "🔐 Running secrets detection for ${{ matrix.scan_type }}..."
+        secureflow scan secrets . \
+          --tool trufflehog \
+          --output-format json \
+          --output-file secrets-${{ matrix.scan_type }}-results.json
+      continue-on-error: true
+
+    - name: 📊 Generate Language-Specific Report
+      if: always()
+      run: |
+        secureflow report generate \
+          --input "*-${{ matrix.scan_type }}-results.json" \
+          --format json,sarif \
+          --output-dir reports-${{ matrix.scan_type }} \
+          --title "Security Report - ${{ matrix.scan_type }}"
+
+    - name: 📄 Upload Scan Results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-results-${{ matrix.scan_type }}-${{ github.sha }}
+        path: |
+          reports-${{ matrix.scan_type }}/
+          *-${{ matrix.scan_type }}-results.json
+        retention-days: 30
+
+  infrastructure-security:
+    name: 🏗️ Infrastructure Security
+    runs-on: ubuntu-latest
+    needs: pre-security-setup
+    if: contains(needs.pre-security-setup.outputs.scan_config, 'terraform') || contains(needs.pre-security-setup.outputs.scan_config, 'kubernetes')
+    
+    permissions:
+      security-events: write
+      contents: read
+    
+    steps:
+    - name: 🔄 Checkout Code
+      uses: actions/checkout@v4
+
+    - name: 📦 Install Security Tools
+      run: |
+        # Install Checkov
+        pip install checkov
+        
+        # Install TFSec
+        curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
+        
+        # Install Trivy
+        sudo apt-get update
+        sudo apt-get install wget apt-transport-https gnupg lsb-release
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+        echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+        sudo apt-get update
+        sudo apt-get install trivy
+
+    - name: 🏗️ Terraform Security Scan
+      if: contains(needs.pre-security-setup.outputs.scan_config, 'terraform')
+      run: |
+        echo "🏗️ Running Terraform security scans..."
+        
+        # Checkov scan
+        checkov -d . --framework terraform --output json --output-file checkov-terraform.json || true
+        
+        # TFSec scan
+        tfsec . --format json --out tfsec-terraform.json || true
+        
+        echo "Terraform security scan completed"
+      continue-on-error: true
+
+    - name: ☸️ Kubernetes Security Scan
+      if: contains(needs.pre-security-setup.outputs.scan_config, 'kubernetes')
+      run: |
+        echo "☸️ Running Kubernetes security scans..."
+        
+        # Find Kubernetes manifests
+        K8S_FILES=$(find . -name "*.yaml" -o -name "*.yml" | grep -E "(k8s|kubernetes)" || find . -name "*.yaml" -exec grep -l "kind:" {} \; || true)
+        
+        if [ -n "$K8S_FILES" ]; then
+          # Checkov scan for Kubernetes
+          checkov -f $K8S_FILES --framework kubernetes --output json --output-file checkov-k8s.json || true
+          
+          echo "Kubernetes security scan completed"
+        else
+          echo "No Kubernetes manifests found"
+        fi
+      continue-on-error: true
+
+    - name: 📄 Upload Infrastructure Results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: infrastructure-security-${{ github.sha }}
+        path: |
+          checkov-*.json
+          tfsec-*.json
+        retention-days: 30
+
+  container-security:
+    name: 🐳 Container Security
+    runs-on: ubuntu-latest
+    needs: pre-security-setup
+    if: github.event.inputs.container_image != '' || hashFiles('Dockerfile', 'docker-compose.yml') != ''
+    
+    permissions:
+      security-events: write
+      contents: read
+    
+    steps:
+    - name: 🔄 Checkout Code
+      uses: actions/checkout@v4
+
+    - name: 🐳 Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: 📦 Install Trivy
+      run: |
+        sudo apt-get update
+        sudo apt-get install wget apt-transport-https gnupg lsb-release
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+        echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+        sudo apt-get update
+        sudo apt-get install trivy
+
+    - name: 🔍 Dockerfile Security Scan
+      if: hashFiles('Dockerfile') != ''
+      run: |
+        echo "🔍 Scanning Dockerfile for security issues..."
+        trivy config --format json --output dockerfile-scan.json . || true
+
+    - name: 🏗️ Build Container Image
+      if: hashFiles('Dockerfile') != ''
+      run: |
+        IMAGE_NAME="${{ github.repository }}:${{ github.sha }}"
+        echo "🏗️ Building container image: $IMAGE_NAME"
+        docker build -t "$IMAGE_NAME" .
+        echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+
+    - name: 🐳 Container Image Security Scan
+      run: |
+        if [ -n "${{ github.event.inputs.container_image }}" ]; then
+          IMAGE_TO_SCAN="${{ github.event.inputs.container_image }}"
+        elif [ -n "$IMAGE_NAME" ]; then
+          IMAGE_TO_SCAN="$IMAGE_NAME"
+        else
+          echo "No container image to scan"
+          exit 0
+        fi
+        
+        echo "🐳 Scanning container image: $IMAGE_TO_SCAN"
+        
+        # Vulnerability scan
+        trivy image --format json --output container-vulns.json "$IMAGE_TO_SCAN" || true
+        
+        # Configuration scan
+        trivy image --format json --scanners config --output container-config.json "$IMAGE_TO_SCAN" || true
+        
+        # Secret scan
+        trivy image --format json --scanners secret --output container-secrets.json "$IMAGE_TO_SCAN" || true
+
+    - name: 📄 Upload Container Results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: container-security-${{ github.sha }}
+        path: |
+          dockerfile-scan.json
+          container-*.json
+        retention-days: 30
+
+  compliance-reporting:
+    name: 📋 Compliance & Reporting
+    runs-on: ubuntu-latest
+    needs: [static-analysis, infrastructure-security, container-security]
+    if: always()
+    
+    permissions:
+      security-events: write
+      contents: read
+      pages: write
+      id-token: write
+    
+    steps:
+    - name: 🔄 Checkout Code
+      uses: actions/checkout@v4
+
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: 📦 Install SecureFlow
+      run: |
+        python -m pip install --upgrade pip
+        pip install secureflow-core[all]
+
+    - name: 📥 Download All Scan Results
+      uses: actions/download-artifact@v3
+      with:
+        path: scan-results/
+
+    - name: 📊 Generate Comprehensive Report
+      run: |
+        echo "📊 Generating comprehensive security report..."
+        
+        # Find all JSON result files
+        find scan-results/ -name "*.json" -type f > result_files.txt
+        
+        if [ -s result_files.txt ]; then
+          # Generate comprehensive report
+          secureflow report generate \
+            --input "scan-results/**/*.json" \
+            --format html,json,sarif \
+            --output-dir comprehensive-report \
+            --include-charts \
+            --include-metrics \
+            --include-remediation \
+            --title "Comprehensive Security Report - ${{ github.repository }}"
+        else
+          echo "No scan results found"
+          mkdir -p comprehensive-report
+          echo "<h1>No Security Scan Results</h1><p>No security scan results were found to report.</p>" > comprehensive-report/index.html
+        fi
+
+    - name: 📋 Generate Compliance Reports
+      run: |
+        echo "📋 Generating compliance reports..."
+        
+        FRAMEWORKS=$(echo '${{ needs.pre-security-setup.outputs.scan_config }}' | jq -r '.compliance_frameworks[]' 2>/dev/null || echo "SOC2 PCI-DSS")
+        
+        for framework in $FRAMEWORKS; do
+          echo "Generating $framework compliance report..."
+          secureflow compliance check \
+            --framework "$framework" \
+            --input "scan-results/**/*.json" \
+            --output "comprehensive-report/compliance-$framework.json" \
+            --format json,html || true
+        done
+
+    - name: 📈 Generate Executive Summary
+      run: |
+        python << 'EOF'
+        import json
+        import glob
+        import os
+        from datetime import datetime
+        
+        # Collect all vulnerabilities
+        all_vulns = []
+        tools_used = set()
+        scan_types = set()
+        
+        for result_file in glob.glob("scan-results/**/*.json", recursive=True):
+            try:
+                with open(result_file) as f:
+                    data = json.load(f)
+                    if isinstance(data, dict) and 'vulnerabilities' in data:
+                        all_vulns.extend(data['vulnerabilities'])
+                        if 'tool' in data:
+                            tools_used.add(data['tool'])
+                        if 'scan_type' in data:
+                            scan_types.add(data['scan_type'])
+            except Exception as e:
+                print(f"Error reading {result_file}: {e}")
+        
+        # Calculate metrics
+        total_vulns = len(all_vulns)
+        critical_vulns = len([v for v in all_vulns if v.get('severity') == 'critical'])
+        high_vulns = len([v for v in all_vulns if v.get('severity') == 'high'])
+        medium_vulns = len([v for v in all_vulns if v.get('severity') == 'medium'])
+        low_vulns = len([v for v in all_vulns if v.get('severity') == 'low'])
+        
+        # Generate executive summary
+        summary = {
+            "scan_date": datetime.now().isoformat(),
+            "repository": "${{ github.repository }}",
+            "total_vulnerabilities": total_vulns,
+            "severity_breakdown": {
+                "critical": critical_vulns,
+                "high": high_vulns,
+                "medium": medium_vulns,
+                "low": low_vulns
+            },
+            "tools_used": list(tools_used),
+            "scan_types": list(scan_types),
+            "security_score": max(0, 100 - (critical_vulns * 20 + high_vulns * 10 + medium_vulns * 5 + low_vulns * 1))
+        }
+        
+        with open("comprehensive-report/executive-summary.json", "w") as f:
+            json.dump(summary, f, indent=2)
+        
+        # Generate simple HTML summary
+        html_summary = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Security Executive Summary</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 40px; }}
+                .metric {{ background: #f8f9fa; padding: 20px; margin: 10px; border-radius: 5px; display: inline-block; }}
+                .critical {{ border-left: 5px solid #dc3545; }}
+                .high {{ border-left: 5px solid #fd7e14; }}
+                .medium {{ border-left: 5px solid #ffc107; }}
+                .low {{ border-left: 5px solid #28a745; }}
+            </style>
+        </head>
+        <body>
+            <h1>🛡️ Security Executive Summary</h1>
+            <p><strong>Repository:</strong> ${{ github.repository }}</p>
+            <p><strong>Scan Date:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
+            
+            <div class="metrics">
+                <div class="metric critical">
+                    <h3>Critical Issues</h3>
+                    <h2>{critical_vulns}</h2>
+                </div>
+                <div class="metric high">
+                    <h3>High Issues</h3>
+                    <h2>{high_vulns}</h2>
+                </div>
+                <div class="metric medium">
+                    <h3>Medium Issues</h3>
+                    <h2>{medium_vulns}</h2>
+                </div>
+                <div class="metric low">
+                    <h3>Low Issues</h3>
+                    <h2>{low_vulns}</h2>
+                </div>
+            </div>
+            
+            <h2>Security Score: {summary['security_score']}/100</h2>
+            <p><strong>Total Vulnerabilities:</strong> {total_vulns}</p>
+            <p><strong>Tools Used:</strong> {', '.join(tools_used) if tools_used else 'None'}</p>
+            <p><strong>Scan Types:</strong> {', '.join(scan_types) if scan_types else 'None'}</p>
+            
+            <p><a href="index.html">View Detailed Report</a></p>
+        </body>
+        </html>
+        """
+        
+        with open("comprehensive-report/executive-summary.html", "w") as f:
+            f.write(html_summary)
+        
+        print(f"📊 Executive Summary Generated:")
+        print(f"   Total Vulnerabilities: {total_vulns}")
+        print(f"   Critical: {critical_vulns}, High: {high_vulns}, Medium: {medium_vulns}, Low: {low_vulns}")
+        print(f"   Security Score: {summary['security_score']}/100")
+        EOF
+
+    - name: 📋 Upload SARIF Results
+      if: always()
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: comprehensive-report/
+        category: secureflow-comprehensive-scan
+      continue-on-error: true
+
+    - name: 📄 Upload Comprehensive Report
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: comprehensive-security-report-${{ github.sha }}
+        path: comprehensive-report/
+        retention-days: 90
+
+    - name: 📤 Upload to GitHub Pages
+      if: github.ref == 'refs/heads/main'
+      uses: actions/upload-pages-artifact@v2
+      with:
+        path: comprehensive-report/
+
+  deploy-pages:
+    name: 🌐 Deploy Security Dashboard
+    runs-on: ubuntu-latest
+    needs: compliance-reporting
+    if: github.ref == 'refs/heads/main'
+    
+    permissions:
+      pages: write
+      id-token: write
+    
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    steps:
+    - name: 🌐 Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v2
+
+  notification:
+    name: 📢 Security Notifications
+    runs-on: ubuntu-latest
+    needs: [compliance-reporting]
+    if: always()
+    
+    steps:
+    - name: 📥 Download Executive Summary
+      uses: actions/download-artifact@v3
+      with:
+        name: comprehensive-security-report-${{ github.sha }}
+        path: report/
+
+    - name: 📧 Create Security Issue
+      if: always()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          
+          let summary = { total_vulnerabilities: 0, severity_breakdown: { critical: 0, high: 0 } };
+          try {
+            const summaryData = fs.readFileSync('report/executive-summary.json', 'utf8');
+            summary = JSON.parse(summaryData);
+          } catch (error) {
+            console.log('Could not read executive summary:', error.message);
+          }
+          
+          const criticalCount = summary.severity_breakdown?.critical || 0;
+          const highCount = summary.severity_breakdown?.high || 0;
+          const totalCount = summary.total_vulnerabilities || 0;
+          
+          if (criticalCount > 0 || (highCount > 0 && '${{ github.event.inputs.notification_level }}' !== 'critical')) {
+            const title = `🚨 Security Alert: ${criticalCount} Critical, ${highCount} High Issues Found`;
+            const body = `## 🛡️ Security Scan Alert
+            
+            **Repository:** ${{ github.repository }}
+            **Scan Date:** ${new Date().toISOString()}
+            **Workflow:** [View Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            
+            ### 📊 Issue Summary
+            - 🔴 **Critical:** ${criticalCount}
+            - 🟠 **High:** ${highCount}
+            - 📊 **Total:** ${totalCount}
+            - 🎯 **Security Score:** ${summary.security_score || 'N/A'}/100
+            
+            ### 🔧 Tools Used
+            ${summary.tools_used ? summary.tools_used.map(tool => `- ${tool}`).join('\n') : 'None'}
+            
+            ### 📄 Reports
+            - [Executive Summary](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - [Detailed Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            ${github.ref === 'refs/heads/main' ? '- [Security Dashboard](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})' : ''}
+            
+            ### ⚡ Next Steps
+            1. Review critical and high severity issues immediately
+            2. Prioritize fixes based on exploitability and impact
+            3. Update dependencies to latest secure versions
+            4. Review and update security configurations
+            
+            *This issue was automatically created by SecureFlow-Core*`;
+            
+            // Create issue
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['security', 'automated', criticalCount > 0 ? 'critical' : 'high-priority']
+            });
+            
+            console.log(`Created security issue: ${issue.data.html_url}`);
+          } else {
+            console.log('No critical or high severity issues found. No notification needed.');
+          }

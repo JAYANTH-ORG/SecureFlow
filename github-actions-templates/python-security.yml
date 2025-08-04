@@ -1,0 +1,166 @@
+# Python Project Security Template
+# Copy this file to .github/workflows/python-security.yml in your repository
+
+name: 🐍 Python Security
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - '**.py'
+      - 'requirements*.txt'
+      - 'pyproject.toml'
+      - 'setup.py'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.py'
+      - 'requirements*.txt'
+      - 'pyproject.toml'
+      - 'setup.py'
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  python-security:
+    name: Python Security Analysis
+    runs-on: ubuntu-latest
+    
+    permissions:
+      security-events: write
+      contents: read
+      pull-requests: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+
+    - name: Setup SecureFlow
+      uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
+
+    - name: Run SAST with Semgrep
+      run: |
+        secureflow scan sast . \
+          --tool semgrep \
+          --rules "p/python" \
+          --output-format json \
+          --output-file semgrep-results.json
+      continue-on-error: true
+
+    - name: Run SAST with Bandit
+      run: |
+        secureflow scan sast . \
+          --tool bandit \
+          --output-format json \
+          --output-file bandit-results.json
+      continue-on-error: true
+
+    - name: Run dependency scan with Safety
+      run: |
+        secureflow scan sca . \
+          --tool safety \
+          --output-format json \
+          --output-file safety-results.json
+      continue-on-error: true
+
+    - name: Run secrets detection
+      run: |
+        secureflow scan secrets . \
+          --tool trufflehog \
+          --output-format json \
+          --output-file secrets-results.json
+      continue-on-error: true
+
+    - name: Generate security report
+      if: always()
+      run: |
+        secureflow report generate \
+          --input "*-results.json" \
+          --format html,sarif \
+          --output-dir security-report \
+          --title "Python Security Report"
+
+    - name: Upload SARIF results
+      if: always()
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: security-report/
+      continue-on-error: true
+
+    - name: Upload security report
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-security-report
+        path: |
+          security-report/
+          *-results.json
+
+    - name: Security summary
+      if: always()
+      run: |
+        python -c "
+        import json, glob, os
+        
+        total_issues = 0
+        critical_issues = 0
+        
+        for file in glob.glob('*-results.json'):
+            if os.path.exists(file):
+                try:
+                    with open(file) as f:
+                        data = json.load(f)
+                        if 'vulnerabilities' in data:
+                            vulns = data['vulnerabilities']
+                            total_issues += len(vulns)
+                            critical_issues += len([v for v in vulns if v.get('severity') == 'critical'])
+                except: pass
+        
+        print(f'🐍 Python Security Summary:')
+        print(f'📊 Total Issues: {total_issues}')
+        print(f'🔴 Critical Issues: {critical_issues}')
+        
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'w') as f:
+            f.write(f'''# 🐍 Python Security Summary
+        
+        - 📊 **Total Issues:** {total_issues}
+        - 🔴 **Critical Issues:** {critical_issues}
+        
+        {'⚠️ **Action Required:** Critical security issues found!' if critical_issues > 0 else '✅ **Good:** No critical security issues detected.'}
+        ''')
+        "
+
+    - name: Fail on critical issues
+      if: always()
+      run: |
+        CRITICAL_COUNT=$(python -c "
+        import json, glob, os
+        critical = 0
+        for file in glob.glob('*-results.json'):
+            if os.path.exists(file):
+                try:
+                    with open(file) as f:
+                        data = json.load(f)
+                        if 'vulnerabilities' in data:
+                            critical += len([v for v in data['vulnerabilities'] if v.get('severity') == 'critical'])
+                except: pass
+        print(critical)
+        ")
+        
+        if [ "$CRITICAL_COUNT" -gt 0 ]; then
+          echo "❌ Found $CRITICAL_COUNT critical security issues!"
+          exit 1
+        fi

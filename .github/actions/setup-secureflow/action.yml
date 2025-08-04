@@ -1,0 +1,140 @@
+name: 'Setup SecureFlow'
+description: 'Installs and configures SecureFlow-Core for GitHub Actions'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.11'
+  secureflow-version:
+    description: 'SecureFlow version to install'
+    required: false
+    default: 'latest'
+  config-file:
+    description: 'Path to SecureFlow configuration file'
+    required: false
+    default: '.secureflow.yaml'
+  install-tools:
+    description: 'Install additional security tools'
+    required: false
+    default: 'true'
+
+outputs:
+  secureflow-version:
+    description: 'Installed SecureFlow version'
+    value: ${{ steps.install.outputs.version }}
+  config-path:
+    description: 'Path to configuration file'
+    value: ${{ steps.config.outputs.path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: 'pip'
+
+    - name: Install SecureFlow
+      id: install
+      shell: bash
+      run: |
+        echo "🔧 Installing SecureFlow-Core..."
+        
+        if [ "${{ inputs.secureflow-version }}" = "latest" ]; then
+          pip install secureflow-core
+        else
+          pip install secureflow-core==${{ inputs.secureflow-version }}
+        fi
+        
+        # Get installed version
+        VERSION=$(python -c "import secureflow_core; print(secureflow_core.__version__)")
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "✅ SecureFlow-Core $VERSION installed successfully"
+
+    - name: Install Additional Security Tools
+      if: inputs.install-tools == 'true'
+      shell: bash
+      run: |
+        echo "🔧 Installing additional security tools..."
+        
+        # Install common security tools
+        pip install semgrep safety bandit checkov
+        
+        # Install system tools
+        if command -v apt-get &> /dev/null; then
+          sudo apt-get update
+          sudo apt-get install -y git
+        elif command -v yum &> /dev/null; then
+          sudo yum install -y git
+        fi
+        
+        echo "✅ Additional security tools installed"
+
+    - name: Setup Configuration
+      id: config
+      shell: bash
+      run: |
+        CONFIG_FILE="${{ inputs.config-file }}"
+        
+        if [ ! -f "$CONFIG_FILE" ]; then
+          echo "📝 Creating default SecureFlow configuration..."
+          
+          cat > "$CONFIG_FILE" << EOF
+        project:
+          name: "${{ github.repository }}"
+          description: "GitHub Actions Security Scan"
+          team: "${{ github.repository_owner }}"
+        
+        scanning:
+          sast_tool: "semgrep"
+          sca_tool: "safety"
+          secrets_tool: "trufflehog"
+          severity_threshold: "medium"
+          
+          exclude_paths:
+            - ".git/"
+            - ".github/"
+            - "node_modules/"
+            - "__pycache__/"
+            - "*.pyc"
+            - "*.log"
+            - "test_data/"
+            - "tests/fixtures/"
+        
+        github:
+          repository: "${{ github.repository }}"
+          token: "\${{ github.token }}"
+        
+        reporting:
+          formats: ["json", "sarif"]
+          include_remediation: true
+        
+        advanced:
+          parallel_scans: true
+          max_workers: 2
+        EOF
+          
+          echo "✅ Default configuration created at $CONFIG_FILE"
+        else
+          echo "✅ Using existing configuration at $CONFIG_FILE"
+        fi
+        
+        echo "path=$CONFIG_FILE" >> $GITHUB_OUTPUT
+
+    - name: Verify Installation
+      shell: bash
+      run: |
+        echo "🔍 Verifying SecureFlow installation..."
+        
+        # Test CLI
+        secureflow --version
+        
+        # Test configuration
+        secureflow config validate ${{ steps.config.outputs.path }}
+        
+        echo "✅ SecureFlow installation verified successfully"

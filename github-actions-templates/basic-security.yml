@@ -1,0 +1,61 @@
+# Basic Security Workflow Template
+# Copy this file to .github/workflows/security.yml in your repository
+
+name: 🛡️ Security Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+
+jobs:
+  security:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    
+    permissions:
+      security-events: write
+      contents: read
+      pull-requests: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup SecureFlow
+      uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
+      with:
+        python-version: '3.11'
+
+    - name: Run security scans
+      run: |
+        secureflow scan all . \
+          --output-format sarif \
+          --output-file security-results.sarif
+
+    - name: Upload SARIF results
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: security-results.sarif
+      if: always()
+
+    - name: Comment on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const comment = `## 🛡️ Security Scan Results
+          
+          Security scan completed! Check the Security tab for detailed results.
+          
+          *Powered by SecureFlow-Core*`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
