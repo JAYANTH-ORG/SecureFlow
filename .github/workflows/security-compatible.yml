@@ -1,0 +1,232 @@
+# Backward Compatible Security Workflow for GitHub Actions
+# This version uses older action versions for compatibility with older GitHub environments
+# Use this if you're running GitHub Enterprise Server or have older self-hosted runners
+
+name: 🛡️ Security Scan (Compatible)
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.gitignore'
+  pull_request:
+    branches: [ main, develop ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.gitignore'
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      scan_type:
+        description: 'Type of security scan'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - sast
+          - sca
+          - secrets
+          - container
+
+env:
+  PYTHON_VERSION: '3.11'
+  SECUREFLOW_VERSION: 'latest'
+
+jobs:
+  security-scan:
+    name: 🔍 Security Analysis
+    runs-on: ubuntu-latest
+    
+    permissions:
+      security-events: write
+      contents: read
+      pull-requests: write
+    
+    steps:
+    - name: 🔄 Checkout Code
+      uses: actions/checkout@v3  # v3 for older Node.js compatibility
+      with:
+        fetch-depth: 0
+
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4  # v4 for Node.js 16+ compatibility
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: 📦 Install SecureFlow
+      run: |
+        python -m pip install --upgrade pip
+        pip install secureflow-core
+        secureflow --version
+
+    - name: ⚙️ Initialize SecureFlow
+      run: |
+        cat > .secureflow.yaml << EOF
+        project:
+          name: "${{ github.repository }}"
+          description: "GitHub Actions Security Scan (Compatible)"
+          team: "${{ github.repository_owner }}"
+        
+        scanning:
+          sast_tool: "semgrep"
+          sca_tool: "safety"
+          secrets_tool: "trufflehog"
+          severity_threshold: "medium"
+          
+          exclude_paths:
+            - ".git/"
+            - ".github/"
+            - "node_modules/"
+            - "__pycache__/"
+            - "*.pyc"
+            - "*.log"
+            - "test_data/"
+            - "tests/fixtures/"
+        
+        github:
+          repository: "${{ github.repository }}"
+          token: "\${{ secrets.GITHUB_TOKEN }}"
+        
+        reporting:
+          formats: ["json", "sarif"]
+          include_remediation: true
+        EOF
+
+    - name: 🔍 Run SAST Scan
+      if: ${{ github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'sast' || github.event.inputs.scan_type == '' }}
+      run: |
+        secureflow scan sast . \
+          --tool semgrep \
+          --output-format json \
+          --output-file sast-results.json \
+          --severity-threshold medium
+      continue-on-error: true
+
+    - name: 📦 Run SCA Scan
+      if: ${{ github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'sca' || github.event.inputs.scan_type == '' }}
+      run: |
+        secureflow scan sca . \
+          --tool safety \
+          --output-format json \
+          --output-file sca-results.json \
+          --check-dependencies
+      continue-on-error: true
+
+    - name: 🔐 Run Secrets Detection
+      if: ${{ github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'secrets' || github.event.inputs.scan_type == '' }}
+      run: |
+        secureflow scan secrets . \
+          --tool trufflehog \
+          --output-format json \
+          --output-file secrets-results.json
+      continue-on-error: true
+
+    - name: 📊 Generate Security Report
+      if: always()
+      run: |
+        secureflow report generate \
+          --input "*-results.json" \
+          --format json,sarif,html \
+          --output-dir security-reports \
+          --include-charts \
+          --include-metrics \
+          --title "Security Scan Report - ${{ github.repository }}"
+
+    - name: 📈 Security Metrics Summary
+      if: always()
+      run: |
+        python -c "
+        import json
+        import glob
+        import os
+        
+        total_issues = 0
+        critical_issues = 0
+        high_issues = 0
+        
+        for file in glob.glob('*-results.json'):
+            if os.path.exists(file) and os.path.getsize(file) > 0:
+                try:
+                    with open(file) as f:
+                        data = json.load(f)
+                        if 'vulnerabilities' in data:
+                            vulns = data['vulnerabilities']
+                            total_issues += len(vulns)
+                            critical_issues += len([v for v in vulns if v.get('severity') == 'critical'])
+                            high_issues += len([v for v in vulns if v.get('severity') == 'high'])
+                except Exception as e:
+                    print(f'Error reading {file}: {e}')
+        
+        print(f'📊 Total Security Issues: {total_issues}')
+        print(f'🔴 Critical Issues: {critical_issues}')
+        print(f'🟠 High Issues: {high_issues}')
+        
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f'total_issues={total_issues}\n')
+            f.write(f'critical_issues={critical_issues}\n')
+            f.write(f'high_issues={high_issues}\n')
+        "
+      id: metrics
+
+    # Use older SARIF upload action for compatibility
+    - name: 📋 Upload SARIF Results
+      if: always()
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: security-reports/
+        category: secureflow-security-scan
+      continue-on-error: true
+
+    # Use older artifact upload for compatibility
+    - name: 📄 Upload Security Reports
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-reports-${{ github.sha }}
+        path: |
+          security-reports/
+          *-results.json
+        retention-days: 30
+
+    - name: 💬 Comment on PR
+      if: github.event_name == 'pull_request' && always()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const totalIssues = '${{ steps.metrics.outputs.total_issues }}';
+          const criticalIssues = '${{ steps.metrics.outputs.critical_issues }}';
+          const highIssues = '${{ steps.metrics.outputs.high_issues }}';
+          
+          const body = `## 🛡️ Security Scan Results (Compatible Mode)
+          
+          **Scan Summary:**
+          - 📊 Total Issues: ${totalIssues}
+          - 🔴 Critical: ${criticalIssues}
+          - 🟠 High: ${highIssues}
+          
+          ${criticalIssues > 0 ? '⚠️ **Critical security issues found!** Please review before merging.' : ''}
+          ${parseInt(totalIssues) === 0 ? '✅ **No security issues detected!**' : ''}
+          
+          📄 Detailed reports are available in the [workflow artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+          
+          *Powered by SecureFlow-Core (Compatible Mode)*`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });
+
+    - name: ❌ Fail on Critical Issues
+      if: steps.metrics.outputs.critical_issues > 0
+      run: |
+        echo "❌ Critical security issues found!"
+        echo "Please review and fix critical security vulnerabilities before proceeding."
+        exit 1

@@ -132,3 +132,99 @@
 2025-08-04 20:59:37,390 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
 2025-08-04 20:59:37,390 - secureflow_core.core - INFO - info:62 - SecureFlow cleanup completed
 2025-08-04 20:59:37,410 - secureflow_core.scanner - WARNING - warning:66 - No dependency files found for Safety scan
+2025-08-04 22:06:29,368 - secureflow_core.scanner - INFO - info:62 - Running SAST scan on test_target
+2025-08-04 22:06:29,408 - secureflow_core.scanner - INFO - info:62 - Running SCA scan on test_target
+2025-08-04 22:06:29,444 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:06:29,449 - secureflow_core.core - INFO - info:62 - Starting repository scan: .
+2025-08-04 22:06:29,450 - secureflow_core.core - INFO - info:62 - Running SAST scan...
+2025-08-04 22:06:29,450 - secureflow_core.core - INFO - info:62 - Running dependency scan...
+2025-08-04 22:06:29,450 - secureflow_core.core - INFO - info:62 - Running secret scan...
+2025-08-04 22:06:29,451 - secureflow_core.core - INFO - info:62 - Running IaC scan...
+2025-08-04 22:06:29,451 - secureflow_core.scanner - INFO - info:62 - Running IaC scan on .
+2025-08-04 22:06:29,523 - secureflow_core.scanner - ERROR - error:70 - Command execution failed: checkov -d . --output json --quiet: [WinError 2] The system cannot find the file specified
+2025-08-04 22:06:29,535 - secureflow_core.utils - INFO - info:62 - Recorded metrics for scan completion
+2025-08-04 22:06:29,535 - secureflow_core.core - INFO - info:62 - Repository scan completed
+2025-08-04 22:06:29,545 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:06:29,563 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:06:29,580 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:06:29,594 - secureflow_core.core - INFO - info:62 - Starting repository scan: .
+2025-08-04 22:06:29,596 - secureflow_core.core - INFO - info:62 - Running SAST scan...
+2025-08-04 22:06:29,597 - secureflow_core.core - INFO - info:62 - Running dependency scan...
+2025-08-04 22:06:29,597 - secureflow_core.scanner - INFO - info:62 - Running SCA scan on .
+2025-08-04 22:06:56,237 - secureflow_core.scanner - WARNING - warning:66 - No dependency files found for Safety scan
+2025-08-04 22:06:56,238 - secureflow_core.core - INFO - info:62 - Running secret scan...
+2025-08-04 22:06:56,238 - secureflow_core.scanner - INFO - info:62 - Running secret scan on .
+2025-08-04 22:06:56,243 - secureflow_core.scanner - ERROR - error:70 - Command execution failed: trufflehog --json filesystem .: [WinError 2] The system cannot find the file specified
+2025-08-04 22:06:56,245 - secureflow_core.core - INFO - info:62 - Running IaC scan...
+2025-08-04 22:06:56,245 - secureflow_core.scanner - INFO - info:62 - Running IaC scan on .
+2025-08-04 22:06:56,251 - secureflow_core.scanner - ERROR - error:70 - Command execution failed: checkov -d . --output json --quiet: [WinError 2] The system cannot find the file specified
+2025-08-04 22:06:56,252 - secureflow_core.utils - INFO - info:62 - Recorded metrics for scan completion
+2025-08-04 22:06:56,252 - secureflow_core.core - INFO - info:62 - Repository scan completed
+2025-08-04 22:06:56,260 - secureflow_core.core - INFO - info:62 - SecureFlow cleanup completed
+2025-08-04 22:06:56,308 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:06:56,309 - secureflow_core.core - INFO - info:62 - SecureFlow cleanup completed
+2025-08-04 22:06:56,361 - secureflow_core.scanner - WARNING - warning:66 - No dependency files found for Safety scan
+2025-08-04 22:07:49,504 - secureflow_core.scanner - INFO - info:62 - Running SAST scan on test_target
+2025-08-04 22:07:49,547 - secureflow_core.scanner - INFO - info:62 - Running SCA scan on test_target
+2025-08-04 22:07:49,584 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:07:49,589 - secureflow_core.core - INFO - info:62 - Starting repository scan: .
+2025-08-04 22:07:49,589 - secureflow_core.core - INFO - info:62 - Running SAST scan...
+2025-08-04 22:07:49,590 - secureflow_core.core - INFO - info:62 - Running dependency scan...
+2025-08-04 22:07:49,590 - secureflow_core.core - INFO - info:62 - Running secret scan...
+2025-08-04 22:07:49,590 - secureflow_core.core - INFO - info:62 - Running IaC scan...
+2025-08-04 22:07:49,592 - secureflow_core.scanner - INFO - info:62 - Running IaC scan on .
+2025-08-04 22:07:49,664 - secureflow_core.scanner - ERROR - error:70 - Command execution failed: checkov -d . --output json --quiet: [WinError 2] The system cannot find the file specified
+2025-08-04 22:07:49,675 - secureflow_core.utils - INFO - info:62 - Recorded metrics for scan completion
+2025-08-04 22:07:49,676 - secureflow_core.core - INFO - info:62 - Repository scan completed
+2025-08-04 22:07:49,684 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:07:49,699 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:07:49,715 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:07:49,728 - secureflow_core.core - INFO - info:62 - Starting repository scan: .
+2025-08-04 22:07:49,729 - secureflow_core.core - INFO - info:62 - Running SAST scan...
+2025-08-04 22:07:49,731 - secureflow_core.core - INFO - info:62 - Running dependency scan...
+2025-08-04 22:07:49,732 - secureflow_core.scanner - INFO - info:62 - Running SCA scan on .
+2025-08-04 22:08:16,321 - secureflow_core.scanner - WARNING - warning:66 - No dependency files found for Safety scan
+2025-08-04 22:08:16,322 - secureflow_core.core - INFO - info:62 - Running secret scan...
+2025-08-04 22:08:16,322 - secureflow_core.scanner - INFO - info:62 - Running secret scan on .
+2025-08-04 22:08:16,329 - secureflow_core.scanner - ERROR - error:70 - Command execution failed: trufflehog --json filesystem .: [WinError 2] The system cannot find the file specified
+2025-08-04 22:08:16,329 - secureflow_core.core - INFO - info:62 - Running IaC scan...
+2025-08-04 22:08:16,329 - secureflow_core.scanner - INFO - info:62 - Running IaC scan on .
+2025-08-04 22:08:16,337 - secureflow_core.scanner - ERROR - error:70 - Command execution failed: checkov -d . --output json --quiet: [WinError 2] The system cannot find the file specified
+2025-08-04 22:08:16,338 - secureflow_core.utils - INFO - info:62 - Recorded metrics for scan completion
+2025-08-04 22:08:16,339 - secureflow_core.core - INFO - info:62 - Repository scan completed
+2025-08-04 22:08:16,347 - secureflow_core.core - INFO - info:62 - SecureFlow cleanup completed
+2025-08-04 22:08:16,391 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:08:16,391 - secureflow_core.core - INFO - info:62 - SecureFlow cleanup completed
+2025-08-04 22:08:16,427 - secureflow_core.scanner - WARNING - warning:66 - No dependency files found for Safety scan
+2025-08-04 22:18:23,199 - secureflow_core.scanner - INFO - info:62 - Running SAST scan on test_target
+2025-08-04 22:18:23,239 - secureflow_core.scanner - INFO - info:62 - Running SCA scan on test_target
+2025-08-04 22:18:23,269 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:18:23,280 - secureflow_core.core - INFO - info:62 - Starting repository scan: .
+2025-08-04 22:18:23,281 - secureflow_core.core - INFO - info:62 - Running SAST scan...
+2025-08-04 22:18:23,281 - secureflow_core.core - INFO - info:62 - Running dependency scan...
+2025-08-04 22:18:23,282 - secureflow_core.core - INFO - info:62 - Running secret scan...
+2025-08-04 22:18:23,283 - secureflow_core.core - INFO - info:62 - Running IaC scan...
+2025-08-04 22:18:23,284 - secureflow_core.scanner - INFO - info:62 - Running IaC scan on .
+2025-08-04 22:18:23,362 - secureflow_core.scanner - ERROR - error:70 - Command execution failed: checkov -d . --output json --quiet: [WinError 2] The system cannot find the file specified
+2025-08-04 22:18:23,373 - secureflow_core.utils - INFO - info:62 - Recorded metrics for scan completion
+2025-08-04 22:18:23,374 - secureflow_core.core - INFO - info:62 - Repository scan completed
+2025-08-04 22:18:23,382 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:18:23,397 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:18:23,412 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:18:23,425 - secureflow_core.core - INFO - info:62 - Starting repository scan: .
+2025-08-04 22:18:23,426 - secureflow_core.core - INFO - info:62 - Running SAST scan...
+2025-08-04 22:18:23,426 - secureflow_core.core - INFO - info:62 - Running dependency scan...
+2025-08-04 22:18:23,427 - secureflow_core.scanner - INFO - info:62 - Running SCA scan on .
+2025-08-04 22:18:48,157 - secureflow_core.scanner - WARNING - warning:66 - No dependency files found for Safety scan
+2025-08-04 22:18:48,157 - secureflow_core.core - INFO - info:62 - Running secret scan...
+2025-08-04 22:18:48,157 - secureflow_core.scanner - INFO - info:62 - Running secret scan on .
+2025-08-04 22:18:48,163 - secureflow_core.scanner - ERROR - error:70 - Command execution failed: trufflehog --json filesystem .: [WinError 2] The system cannot find the file specified
+2025-08-04 22:18:48,164 - secureflow_core.core - INFO - info:62 - Running IaC scan...
+2025-08-04 22:18:48,164 - secureflow_core.scanner - INFO - info:62 - Running IaC scan on .
+2025-08-04 22:18:48,170 - secureflow_core.scanner - ERROR - error:70 - Command execution failed: checkov -d . --output json --quiet: [WinError 2] The system cannot find the file specified
+2025-08-04 22:18:48,170 - secureflow_core.utils - INFO - info:62 - Recorded metrics for scan completion
+2025-08-04 22:18:48,170 - secureflow_core.core - INFO - info:62 - Repository scan completed
+2025-08-04 22:18:48,178 - secureflow_core.core - INFO - info:62 - SecureFlow cleanup completed
+2025-08-04 22:18:48,208 - secureflow_core.core - INFO - info:62 - SecureFlow initialized successfully
+2025-08-04 22:18:48,208 - secureflow_core.core - INFO - info:62 - SecureFlow cleanup completed
+2025-08-04 22:18:48,234 - secureflow_core.scanner - WARNING - warning:66 - No dependency files found for Safety scan

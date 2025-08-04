@@ -97,14 +97,14 @@ jobs:
 
     - name: Upload SARIF results
       if: always()
-      uses: github/codeql-action/upload-sarif@v2
+      uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: container-report/
       continue-on-error: true
 
     - name: Upload container report
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: container-security-report
         path: |

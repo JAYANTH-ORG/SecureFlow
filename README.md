@@ -112,6 +112,43 @@ secureflow report --format json --output compliance.json
 secureflow azure deploy-templates --project MyProject
 ```
 
+## 🎯 What Can SecureFlow Scan?
+
+SecureFlow-Core supports a wide range of application types and technologies:
+
+### **Application Types**
+🌐 **Web Apps** (React, Vue, Angular, APIs)  
+📱 **Mobile Apps** (iOS, Android, React Native, Flutter)  
+🖥️ **Desktop Apps** (Electron, Native)  
+☁️ **Cloud-Native** (Containers, Serverless, Kubernetes)  
+🏗️ **Infrastructure** (Terraform, CloudFormation, ARM)  
+
+### **Programming Languages**  
+🐍 Python • 🟨 JavaScript/TypeScript • ☕ Java • 🔷 C#/.NET • 🐹 Go • 💎 Ruby • 🐘 PHP • and more...
+
+### **Security Scan Types**
+🔍 **SAST** - Source code vulnerabilities  
+📦 **SCA** - Dependency vulnerabilities  
+🔐 **Secrets** - Hardcoded credentials  
+🏗️ **IaC** - Infrastructure misconfigurations  
+🐳 **Container** - Image & runtime security  
+
+## 📚 Documentation
+
+### **Quick Access**
+- 📋 **[Complete Documentation Index](./DOCUMENTATION_INDEX.md)** - Navigate all documentation by role
+- 🎯 **[Quick Reference](./QUICK_REFERENCE.md)** - Commands and scan types
+- 📊 **[Comprehensive Analysis](./COMPREHENSIVE_ANALYSIS.md)** - Technical deep-dive and roadmap
+- 📚 **[Usage Guide](./USAGE_GUIDE.md)** - Detailed scenarios and examples
+
+### **By Role**
+- 👩‍💻 **Developers**: [README.md](./README.md) → [Quick Reference](./QUICK_REFERENCE.md) → [Examples](./examples/)
+- 🔧 **DevOps**: [Azure DevOps](./azure-pipelines/) | [GitHub Actions](./github-actions-templates/) → [Compatibility Guide](./COMPATIBILITY_GUIDE.md)
+- 🏢 **Technical Leaders**: [Comprehensive Analysis](./COMPREHENSIVE_ANALYSIS.md) → [Project Summary](./PROJECT_SUMMARY.md)
+- 🛡️ **Security Teams**: [Supported Applications](./SUPPORTED_APPLICATIONS.md) → [Usage Guide](./USAGE_GUIDE.md)
+
+**See the complete list**: [📋 Supported Applications](./SUPPORTED_APPLICATIONS.md) | [🎯 Quick Reference](./QUICK_REFERENCE.md) | [📊 Comprehensive Analysis](./COMPREHENSIVE_ANALYSIS.md)
+
 ## 🏗️ Azure DevOps Pipeline Integration
 
 ### Example Pipeline Template
@@ -525,3 +562,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 Made with ❤️ by the CodeVibe Team
+
+### Backward Compatibility
+
+SecureFlow supports multiple environment configurations:
+
+- **Modern Environments** - Use standard workflows with latest action versions
+- **Legacy Environments** - Use `.github/workflows/security-compatible.yml` for:
+  - GitHub Enterprise Server 3.4-3.5
+  - Self-hosted runners with older Node.js versions
+  - Environments requiring older action versions
+
+For detailed compatibility information and troubleshooting, see [COMPATIBILITY_GUIDE.md](./COMPATIBILITY_GUIDE.md).
