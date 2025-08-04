@@ -48,7 +48,7 @@ jobs:
       uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
 
     - name: Scan Dockerfile
-      if: ${{ hashFiles('Dockerfile') != '' }}
+      if: hashFiles('**/Dockerfile') != ''
       run: |
         echo "🔍 Scanning Dockerfile for security issues..."
         secureflow scan iac . \
@@ -59,7 +59,7 @@ jobs:
       continue-on-error: true
 
     - name: Build container image
-      if: ${{ hashFiles('Dockerfile') != '' }}
+      if: hashFiles('**/Dockerfile') != ''
       run: |
         IMAGE_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
         echo "🏗️ Building container image: $IMAGE_TAG"

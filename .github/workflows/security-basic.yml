@@ -139,7 +139,7 @@ jobs:
       continue-on-error: true
 
     - name: 🐳 Run Container Security Scan
-      if: ${{ (github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'container') && hashFiles('Dockerfile', 'docker-compose.yml') != '' }}
+      if: (github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'container') && hashFiles('**/Dockerfile', '**/docker-compose.yml') != ''
       run: |
         echo "🐳 Running Container Security Scan..."
         if [ -f "Dockerfile" ]; then
@@ -233,7 +233,7 @@ jobs:
         retention-days: 30
 
     - name: 💬 Comment on PR
-      if: ${{ github.event_name == 'pull_request' && always() }}
+      if: github.event_name == 'pull_request' && always()
       uses: actions/github-script@v6
       with:
         script: |
