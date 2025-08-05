@@ -96,14 +96,36 @@ jobs:
           SCAN_TYPES_JSON+="\"${SCAN_TYPES[$i]}\""
         done
         SCAN_TYPES_JSON+="]"
-        # Create scan configuration using echo to avoid indentation issues
-        echo "{" > scan_config.json
-        echo "  \"project_name\": \"${{ github.repository }}\"," >> scan_config.json
-        echo "  \"scan_types\": $SCAN_TYPES_JSON," >> scan_config.json
-        echo "  \"compliance_frameworks\": [\"SOC2\", \"PCI-DSS\"]," >> scan_config.json
-        echo "  \"container_image\": \"${{ github.event.inputs.container_image }}\"," >> scan_config.json
-        echo "  \"notification_level\": \"${{ github.event.inputs.notification_level || 'high' }}\"" >> scan_config.json
-        echo "}" >> scan_config.json
+        # Create scan configuration with proper JSON escaping
+        PROJECT_NAME="${{ github.repository }}"
+        CONTAINER_IMAGE="${{ github.event.inputs.container_image }}"
+        NOTIFICATION_LEVEL="${{ github.event.inputs.notification_level || 'high' }}"
+        
+        # Properly escape JSON strings
+        PROJECT_NAME_ESCAPED=$(printf '%s' "$PROJECT_NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        CONTAINER_IMAGE_ESCAPED=$(printf '%s' "$CONTAINER_IMAGE" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        NOTIFICATION_LEVEL_ESCAPED=$(printf '%s' "$NOTIFICATION_LEVEL" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        
+        # Create properly formatted JSON
+        cat > scan_config.json << EOF
+{
+  "project_name": "$PROJECT_NAME_ESCAPED",
+  "scan_types": $SCAN_TYPES_JSON,
+  "compliance_frameworks": ["SOC2", "PCI-DSS"],
+  "container_image": "$CONTAINER_IMAGE_ESCAPED",
+  "notification_level": "$NOTIFICATION_LEVEL_ESCAPED"
+}
+EOF
+        
+        # Validate JSON format
+        if ! python3 -m json.tool scan_config.json > /dev/null 2>&1; then
+          echo "❌ Generated JSON is invalid. Content:"
+          cat scan_config.json
+          exit 1
+        fi
+        
+        echo "✅ Generated valid JSON configuration:"
+        cat scan_config.json
         
         echo "scan_config=$(cat scan_config.json)" >> $GITHUB_OUTPUT
 
