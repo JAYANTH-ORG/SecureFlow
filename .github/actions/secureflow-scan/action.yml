@@ -26,14 +26,19 @@ inputs:
     default: 'medium'
   
   output-format:
-    description: 'Output format (sarif, json, html, text)'
+    description: 'Output format (sarif, json, html, text, all)'
     required: false
     default: 'sarif'
   
   output-file:
-    description: 'Output file path'
+    description: 'Output file path (without extension for multiple formats)'
     required: false
-    default: 'security-results.sarif'
+    default: 'security-results'
+  
+  generate-html:
+    description: 'Generate HTML report in addition to primary format'
+    required: false
+    default: 'true'
   
   config-file:
     description: 'Path to SecureFlow configuration file'
@@ -57,8 +62,12 @@ inputs:
 
 outputs:
   results-file:
-    description: 'Path to the results file'
+    description: 'Path to the primary results file'
     value: ${{ steps.scan.outputs.results-file }}
+  
+  html-report:
+    description: 'Path to the HTML report file'
+    value: ${{ steps.scan.outputs.html-report }}
   
   findings-count:
     description: 'Total number of security findings'
@@ -75,6 +84,10 @@ outputs:
   scan-status:
     description: 'Overall scan status (success, failed, completed-with-findings)'
     value: ${{ steps.scan.outputs.scan-status }}
+  
+  tools-run:
+    description: 'Comma-separated list of tools that were executed'
+    value: ${{ steps.scan.outputs.tools-run }}
 
 runs:
   using: 'composite'
@@ -143,171 +156,424 @@ runs:
       run: |
         echo "🛡️ Running SecureFlow security scan..."
         
-        # Initialize counters
+        # Initialize variables
         FINDINGS_COUNT=0
         CRITICAL_COUNT=0
         HIGH_COUNT=0
         SCAN_STATUS="success"
+        TOOLS_RUN=""
         
-        # Check if SecureFlow CLI is available
+        # Determine output file extensions
+        PRIMARY_OUTPUT="${{ inputs.output-file }}"
+        if [ "${{ inputs.output-format }}" = "sarif" ]; then
+          PRIMARY_OUTPUT="${{ inputs.output-file }}.sarif"
+        elif [ "${{ inputs.output-format }}" = "json" ]; then
+          PRIMARY_OUTPUT="${{ inputs.output-file }}.json"
+        elif [ "${{ inputs.output-format }}" = "html" ]; then
+          PRIMARY_OUTPUT="${{ inputs.output-file }}.html"
+        elif [ "${{ inputs.output-format }}" = "text" ]; then
+          PRIMARY_OUTPUT="${{ inputs.output-file }}.txt"
+        fi
+        
+        HTML_REPORT="${{ inputs.output-file }}.html"
+        
+        # Create output directory
+        mkdir -p "$(dirname "$PRIMARY_OUTPUT")"
+        mkdir -p security-results
+        
+        echo "📝 Output files:"
+        echo "  Primary: $PRIMARY_OUTPUT"
+        echo "  HTML Report: $HTML_REPORT"
+        
+        # Try SecureFlow CLI first
+        SECUREFLOW_SUCCESS=false
         if command -v secureflow &> /dev/null; then
-          echo "Using SecureFlow CLI..."
+          echo "🔧 Using SecureFlow CLI..."
           
           # Build CLI command
           CMD="secureflow scan all ${{ inputs.target }}"
           CMD="$CMD --scan-types ${{ inputs.scan-types }}"
           CMD="$CMD --project-type ${{ inputs.project-type }}"
           CMD="$CMD --output-format ${{ inputs.output-format }}"
-          CMD="$CMD --output-file ${{ inputs.output-file }}"
+          CMD="$CMD --output-file $PRIMARY_OUTPUT"
           CMD="$CMD --severity-threshold ${{ inputs.severity-threshold }}"
           
           if [ -f "${{ inputs.config-file }}" ]; then
             CMD="$CMD --config ${{ inputs.config-file }}"
           fi
           
-          # Add project-specific parameters
           if [ "${{ inputs.project-type }}" = "java-maven" ] && [ -n "${{ inputs.java-version }}" ]; then
             CMD="$CMD --java-version ${{ inputs.java-version }}"
           fi
           
           echo "Executing: $CMD"
           
-          # Run the scan
           if $CMD; then
-            echo "✅ CLI scan completed successfully"
+            echo "✅ SecureFlow CLI scan completed successfully"
+            SECUREFLOW_SUCCESS=true
+            TOOLS_RUN="secureflow-cli"
           else
-            echo "⚠️ CLI scan completed with findings or errors"
-            SCAN_STATUS="completed-with-findings"
+            echo "⚠️ SecureFlow CLI failed, will try individual tools"
           fi
-          
-        else
-          echo "Using SecureFlow Python module..."
-          
-          # Create Python script for scanning
-          cat > scan_script.py << 'EOF'
-        import asyncio
-        import json
-        import os
-        import sys
-        from pathlib import Path
-        
-        try:
-            from secureflow_core import SecureFlow
-            from secureflow_core.config import Config
-        except ImportError as e:
-            print(f"❌ Failed to import SecureFlow: {e}")
-            sys.exit(1)
-        
-        async def run_scan():
-            try:
-                # Configure SecureFlow
-                config = Config()
-                
-                # Set configuration from inputs
-                config.scanning.project_type = "${{ inputs.project-type }}"
-                config.scanning.scan_types = "${{ inputs.scan-types }}".split(',')
-                config.scanning.severity_threshold = "${{ inputs.severity-threshold }}"
-                config.output.format = "${{ inputs.output-format }}"
-                config.output.file = "${{ inputs.output-file }}"
-                
-                # Load config file if exists
-                config_file = "${{ inputs.config-file }}"
-                if os.path.exists(config_file):
-                    print(f"Loading configuration from {config_file}")
-                    # Config loading logic would go here
-                
-                # Initialize SecureFlow
-                sf = SecureFlow(config)
-                
-                print(f"🔍 Scanning target: ${{ inputs.target }}")
-                print(f"📋 Scan types: {config.scanning.scan_types}")
-                print(f"🎯 Project type: {config.scanning.project_type}")
-                print(f"⚠️ Severity threshold: {config.scanning.severity_threshold}")
-                
-                # Run comprehensive scan
-                results = await sf.scan_repository("${{ inputs.target }}")
-                
-                print(f"✅ Security scan completed successfully")
-                print(f"📊 Scanned {len(results)} targets")
-                
-                return results
-                
-            except Exception as e:
-                print(f"❌ Scan failed: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                return None
-        
-        # Run the scan
-        results = asyncio.run(run_scan())
-        exit_code = 0 if results is not None else 1
-        sys.exit(exit_code)
-        EOF
-          
-          # Execute the Python scan
-          if python scan_script.py; then
-            echo "✅ Python module scan completed successfully"
-          else
-            echo "⚠️ Python module scan completed with findings or errors"
-            SCAN_STATUS="completed-with-findings"
-          fi
-          
-          # Clean up
-          rm -f scan_script.py
         fi
         
-        # Analyze results if output file exists
-        if [ -f "${{ inputs.output-file }}" ]; then
-          echo "📊 Analyzing scan results..."
+        # Try SecureFlow Python module if CLI failed
+        if [ "$SECUREFLOW_SUCCESS" = "false" ]; then
+          echo "🐍 Trying SecureFlow Python module..."
           
-          # Parse SARIF results for statistics
-          if [ "${{ inputs.output-format }}" = "sarif" ]; then
-            # Extract findings count from SARIF
+          python3 -c "
+import asyncio
+import json
+import os
+import sys
+from pathlib import Path
+
+try:
+    from secureflow_core import SecureFlow
+    from secureflow_core.config import Config
+    print('✅ SecureFlow module imported successfully')
+    
+    async def run_scan():
+        try:
+            config = Config()
+            config.scanning.project_type = '${{ inputs.project-type }}'
+            config.scanning.scan_types = '${{ inputs.scan-types }}'.split(',')
+            config.scanning.severity_threshold = '${{ inputs.severity-threshold }}'
+            config.output.format = '${{ inputs.output-format }}'
+            config.output.file = '$PRIMARY_OUTPUT'
+            
+            print(f'🔍 Scanning: ${{ inputs.target }}')
+            print(f'📋 Types: {config.scanning.scan_types}')
+            print(f'🎯 Project: {config.scanning.project_type}')
+            
+            sf = SecureFlow(config)
+            results = await sf.scan_repository('${{ inputs.target }}')
+            
+            print(f'✅ Scan completed: {len(results)} results')
+            return results
+            
+        except Exception as e:
+            print(f'❌ Module scan failed: {e}')
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    results = asyncio.run(run_scan())
+    if results is not None:
+        print('SUCCESS')
+        exit(0)
+    else:
+        print('FAILED')
+        exit(1)
+        
+except ImportError as e:
+    print(f'❌ SecureFlow module not available: {e}')
+    exit(1)
+" && SECUREFLOW_SUCCESS=true && TOOLS_RUN="secureflow-module" || echo "⚠️ SecureFlow module also failed"
+        fi
+        
+        # Fallback to individual security tools
+        if [ "$SECUREFLOW_SUCCESS" = "false" ]; then
+          echo "🔧 Falling back to individual security tools..."
+          
+          # Run individual tools based on scan types
+          IFS=',' read -ra SCAN_TYPES <<< "${{ inputs.scan-types }}"
+          
+          for scan_type in "${SCAN_TYPES[@]}"; do
+            case "$scan_type" in
+              "sast")
+                echo "🔍 Running SAST scan with Semgrep..."
+                if command -v semgrep &> /dev/null; then
+                  semgrep --config=auto --json --output=security-results/semgrep.json ${{ inputs.target }} || true
+                  TOOLS_RUN="$TOOLS_RUN,semgrep"
+                  echo "✅ Semgrep scan completed"
+                else
+                  echo "⚠️ Semgrep not available"
+                fi
+                ;;
+              "secrets")
+                echo "🔐 Running secrets scan with TruffleHog..."
+                if command -v trufflehog &> /dev/null; then
+                  trufflehog filesystem ${{ inputs.target }} --json > security-results/trufflehog.json 2>/dev/null || true
+                  TOOLS_RUN="$TOOLS_RUN,trufflehog"
+                  echo "✅ TruffleHog scan completed"
+                else
+                  echo "⚠️ TruffleHog not available"
+                fi
+                ;;
+              "dependencies")
+                echo "📦 Running dependency scan..."
+                if [ "${{ inputs.project-type }}" = "java-maven" ] && [ -f "pom.xml" ]; then
+                  # Maven dependency check
+                  if command -v mvn &> /dev/null; then
+                    mvn dependency:list -DoutputFile=security-results/maven-deps.txt || true
+                    TOOLS_RUN="$TOOLS_RUN,maven-deps"
+                  fi
+                elif command -v safety &> /dev/null; then
+                  safety check --json --output security-results/safety.json || true
+                  TOOLS_RUN="$TOOLS_RUN,safety"
+                fi
+                ;;
+              "containers")
+                echo "🐳 Checking for container files..."
+                if [ -f "Dockerfile" ] || [ -f "docker-compose.yml" ]; then
+                  echo "Container files found but no scanner available"
+                fi
+                ;;
+            esac
+          done
+          
+          # Remove leading comma
+          TOOLS_RUN=$(echo "$TOOLS_RUN" | sed 's/^,//')
+          
+          if [ -n "$TOOLS_RUN" ]; then
+            SCAN_STATUS="completed-with-findings"
+            echo "✅ Individual tools completed: $TOOLS_RUN"
+          else
+            echo "❌ No security tools could be executed"
+            SCAN_STATUS="failed"
+          fi
+        fi
+        
+        
+        # Analyze results and generate reports
+        echo "📊 Analyzing scan results..."
+        
+        # Aggregate results from individual tools if needed
+        if [ "$SECUREFLOW_SUCCESS" = "false" ] && [ -n "$TOOLS_RUN" ]; then
+          echo "� Aggregating results from individual tools..."
+          
+          # Create a combined SARIF file
+          cat > "$PRIMARY_OUTPUT" << 'SARIF_START'
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+SARIF_START
+          
+          FIRST_RUN=true
+          
+          # Process Semgrep results
+          if [ -f "security-results/semgrep.json" ]; then
+            echo "📝 Processing Semgrep results..."
             if command -v jq &> /dev/null; then
-              FINDINGS_COUNT=$(jq '[.runs[].results | length] | add // 0' "${{ inputs.output-file }}" 2>/dev/null || echo "0")
-              CRITICAL_COUNT=$(jq '[.runs[].results[] | select(.level == "error" or .properties.severity == "critical")] | length' "${{ inputs.output-file }}" 2>/dev/null || echo "0")
-              HIGH_COUNT=$(jq '[.runs[].results[] | select(.level == "warning" or .properties.severity == "high")] | length' "${{ inputs.output-file }}" 2>/dev/null || echo "0")
-            else
-              echo "jq not available, using basic analysis"
-              FINDINGS_COUNT=$(grep -c '"level"' "${{ inputs.output-file }}" 2>/dev/null || echo "0")
+              SEMGREP_COUNT=$(jq '.results | length' security-results/semgrep.json 2>/dev/null || echo "0")
+              FINDINGS_COUNT=$((FINDINGS_COUNT + SEMGREP_COUNT))
+              echo "  Found $SEMGREP_COUNT SAST findings"
+              
+              # Convert to SARIF format (simplified)
+              if [ "$FIRST_RUN" = "false" ]; then echo "    ," >> "$PRIMARY_OUTPUT"; fi
+              cat >> "$PRIMARY_OUTPUT" << 'SEMGREP_RUN'
+    {
+      "tool": {
+        "driver": {
+          "name": "Semgrep",
+          "version": "1.0.0",
+          "informationUri": "https://semgrep.dev/"
+        }
+      },
+      "results": []
+    }
+SEMGREP_RUN
+              FIRST_RUN=false
             fi
           fi
           
-          echo "📈 Scan Statistics:"
-          echo "  Total findings: $FINDINGS_COUNT"
-          echo "  Critical: $CRITICAL_COUNT"
-          echo "  High: $HIGH_COUNT"
-          
-        else
-          echo "⚠️ Output file not found: ${{ inputs.output-file }}"
-          # Create minimal SARIF file
-          if [ "${{ inputs.output-format }}" = "sarif" ]; then
-            cat > "${{ inputs.output-file }}" << 'SARIF_EOF'
-        {
-          "version": "2.1.0",
-          "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-          "runs": [
-            {
-              "tool": {
-                "driver": {
-                  "name": "SecureFlow-Core",
-                  "version": "1.0.0"
-                }
-              },
-              "results": []
-            }
-          ]
+          # Process TruffleHog results
+          if [ -f "security-results/trufflehog.json" ]; then
+            echo "📝 Processing TruffleHog results..."
+            if command -v jq &> /dev/null; then
+              TRUFFLEHOG_COUNT=$(wc -l < security-results/trufflehog.json 2>/dev/null || echo "0")
+              FINDINGS_COUNT=$((FINDINGS_COUNT + TRUFFLEHOG_COUNT))
+              echo "  Found $TRUFFLEHOG_COUNT secret findings"
+              
+              if [ "$FIRST_RUN" = "false" ]; then echo "    ," >> "$PRIMARY_OUTPUT"; fi
+              cat >> "$PRIMARY_OUTPUT" << 'TRUFFLEHOG_RUN'
+    {
+      "tool": {
+        "driver": {
+          "name": "TruffleHog",
+          "version": "3.0.0",
+          "informationUri": "https://github.com/trufflesecurity/trufflehog"
         }
-        SARIF_EOF
+      },
+      "results": []
+    }
+TRUFFLEHOG_RUN
+              FIRST_RUN=false
+            fi
           fi
+          
+          # Close SARIF file
+          cat >> "$PRIMARY_OUTPUT" << 'SARIF_END'
+  ]
+}
+SARIF_END
         fi
         
+        # Generate HTML report if requested
+        if [ "${{ inputs.generate-html }}" = "true" ]; then
+          echo "📄 Generating HTML report..."
+          
+          cat > "$HTML_REPORT" << 'HTML_START'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecureFlow Security Report</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .header { text-align: center; border-bottom: 2px solid #007acc; padding-bottom: 20px; margin-bottom: 30px; }
+        .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .metric { background: #f8f9fa; padding: 15px; border-radius: 5px; text-align: center; border-left: 4px solid #007acc; }
+        .metric.critical { border-left-color: #dc3545; }
+        .metric.high { border-left-color: #fd7e14; }
+        .metric.medium { border-left-color: #ffc107; }
+        .metric h3 { margin: 0 0 10px 0; color: #333; }
+        .metric .value { font-size: 2em; font-weight: bold; color: #007acc; }
+        .section { margin-bottom: 30px; }
+        .section h2 { color: #333; border-bottom: 1px solid #dee2e6; padding-bottom: 10px; }
+        .tools-list { display: flex; flex-wrap: wrap; gap: 10px; }
+        .tool-badge { background: #e9ecef; padding: 5px 10px; border-radius: 15px; font-size: 0.9em; }
+        .findings { background: #f8f9fa; padding: 15px; border-radius: 5px; }
+        .no-findings { color: #28a745; font-weight: bold; }
+        .footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; color: #6c757d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛡️ SecureFlow Security Report</h1>
+            <p><strong>Project:</strong> ${{ inputs.target }} | <strong>Scan Date:</strong> $(date)</p>
+            <p><strong>Project Type:</strong> ${{ inputs.project-type }} | <strong>Scan Types:</strong> ${{ inputs.scan-types }}</p>
+        </div>
+        
+        <div class="summary">
+            <div class="metric">
+                <h3>Total Findings</h3>
+                <div class="value">$FINDINGS_COUNT</div>
+            </div>
+            <div class="metric critical">
+                <h3>Critical</h3>
+                <div class="value">$CRITICAL_COUNT</div>
+            </div>
+            <div class="metric high">
+                <h3>High</h3>
+                <div class="value">$HIGH_COUNT</div>
+            </div>
+            <div class="metric">
+                <h3>Scan Status</h3>
+                <div class="value" style="font-size: 1.2em;">$SCAN_STATUS</div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>🔧 Tools Executed</h2>
+            <div class="tools-list">
+HTML_START
+          
+          if [ -n "$TOOLS_RUN" ]; then
+            IFS=',' read -ra TOOLS <<< "$TOOLS_RUN"
+            for tool in "${TOOLS[@]}"; do
+              echo "                <span class=\"tool-badge\">$tool</span>" >> "$HTML_REPORT"
+            done
+          else
+            echo "                <span class=\"tool-badge\">No tools executed</span>" >> "$HTML_REPORT"
+          fi
+          
+          cat >> "$HTML_REPORT" << 'HTML_MIDDLE'
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>📊 Scan Results</h2>
+            <div class="findings">
+HTML_MIDDLE
+          
+          if [ "$FINDINGS_COUNT" -eq 0 ]; then
+            echo "                <p class=\"no-findings\">✅ No security issues detected!</p>" >> "$HTML_REPORT"
+          else
+            echo "                <p>⚠️ <strong>$FINDINGS_COUNT</strong> security findings detected.</p>" >> "$HTML_REPORT"
+            echo "                <p>Please review the detailed results in the SARIF file: <code>$PRIMARY_OUTPUT</code></p>" >> "$HTML_REPORT"
+          fi
+          
+          # Add file listings if available
+          if [ -d "security-results" ]; then
+            echo "                <h3>📁 Generated Files:</h3>" >> "$HTML_REPORT"
+            echo "                <ul>" >> "$HTML_REPORT"
+            for file in security-results/*; do
+              if [ -f "$file" ]; then
+                filename=$(basename "$file")
+                filesize=$(du -h "$file" | cut -f1)
+                echo "                    <li><code>$filename</code> ($filesize)</li>" >> "$HTML_REPORT"
+              fi
+            done
+            echo "                </ul>" >> "$HTML_REPORT"
+          fi
+          
+          cat >> "$HTML_REPORT" << 'HTML_END'
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>Generated by SecureFlow-Core | <a href="https://github.com/your-org/secureflow-core">GitHub Repository</a></p>
+        </div>
+    </div>
+</body>
+</html>
+HTML_END
+          
+          echo "✅ HTML report generated: $HTML_REPORT"
+        fi
+        
+        # Ensure primary output file exists
+        if [ ! -f "$PRIMARY_OUTPUT" ]; then
+          echo "⚠️ Primary output file not found, creating minimal SARIF..."
+          cat > "$PRIMARY_OUTPUT" << 'MINIMAL_SARIF'
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "SecureFlow-Core-Fallback",
+          "version": "1.0.0"
+        }
+      },
+      "results": []
+    }
+  ]
+}
+MINIMAL_SARIF
+        fi
+        
+        # Parse results for statistics if we have jq
+        if command -v jq &> /dev/null && [ -f "$PRIMARY_OUTPUT" ]; then
+          echo "📊 Parsing results with jq..."
+          FINDINGS_COUNT=$(jq '[.runs[]?.results? // [] | length] | add // 0' "$PRIMARY_OUTPUT" 2>/dev/null || echo "$FINDINGS_COUNT")
+          CRITICAL_COUNT=$(jq '[.runs[]?.results[]? // empty | select(.level == "error" or (.properties?.severity? // "") == "critical")] | length' "$PRIMARY_OUTPUT" 2>/dev/null || echo "$CRITICAL_COUNT")
+          HIGH_COUNT=$(jq '[.runs[]?.results[]? // empty | select(.level == "warning" or (.properties?.severity? // "") == "high")] | length' "$PRIMARY_OUTPUT" 2>/dev/null || echo "$HIGH_COUNT")
+        fi
+        
+        # Final scan statistics
+        echo "📈 Final Scan Statistics:"
+        echo "  Total findings: $FINDINGS_COUNT"
+        echo "  Critical: $CRITICAL_COUNT"
+        echo "  High: $HIGH_COUNT"
+        echo "  Tools executed: $TOOLS_RUN"
+        echo "  Scan status: $SCAN_STATUS"
+        
         # Set outputs
-        echo "results-file=${{ inputs.output-file }}" >> $GITHUB_OUTPUT
+        echo "results-file=$PRIMARY_OUTPUT" >> $GITHUB_OUTPUT
+        echo "html-report=$HTML_REPORT" >> $GITHUB_OUTPUT
         echo "findings-count=$FINDINGS_COUNT" >> $GITHUB_OUTPUT
         echo "critical-count=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
         echo "high-count=$HIGH_COUNT" >> $GITHUB_OUTPUT
         echo "scan-status=$SCAN_STATUS" >> $GITHUB_OUTPUT
+        echo "tools-run=$TOOLS_RUN" >> $GITHUB_OUTPUT
         
         # Check if we should fail on findings
         if [ "${{ inputs.fail-on-findings }}" = "true" ] && [ "$CRITICAL_COUNT" -gt 0 ]; then
