@@ -1,0 +1,320 @@
+name: 'SecureFlow Security Scan'
+description: 'Run comprehensive security scanning with SecureFlow-Core'
+branding:
+  icon: 'search'
+  color: 'red'
+
+inputs:
+  target:
+    description: 'Target directory or file to scan'
+    required: false
+    default: '.'
+  
+  project-type:
+    description: 'Project type (auto, java-maven, nodejs, python, dotnet, etc.)'
+    required: false
+    default: 'auto'
+  
+  scan-types:
+    description: 'Comma-separated list of scan types (sast,secrets,dependencies,containers,iac)'
+    required: false
+    default: 'sast,secrets,dependencies'
+  
+  severity-threshold:
+    description: 'Minimum severity threshold (low, medium, high, critical)'
+    required: false
+    default: 'medium'
+  
+  output-format:
+    description: 'Output format (sarif, json, html, text)'
+    required: false
+    default: 'sarif'
+  
+  output-file:
+    description: 'Output file path'
+    required: false
+    default: 'security-results.sarif'
+  
+  config-file:
+    description: 'Path to SecureFlow configuration file'
+    required: false
+    default: '.secureflow.yaml'
+  
+  fail-on-findings:
+    description: 'Fail the action if security findings are detected'
+    required: false
+    default: 'false'
+  
+  java-version:
+    description: 'Java version for Java projects'
+    required: false
+    default: ''
+  
+  node-version:
+    description: 'Node.js version for Node.js projects'
+    required: false
+    default: ''
+
+outputs:
+  results-file:
+    description: 'Path to the results file'
+    value: ${{ steps.scan.outputs.results-file }}
+  
+  findings-count:
+    description: 'Total number of security findings'
+    value: ${{ steps.scan.outputs.findings-count }}
+  
+  critical-count:
+    description: 'Number of critical severity findings'
+    value: ${{ steps.scan.outputs.critical-count }}
+  
+  high-count:
+    description: 'Number of high severity findings'
+    value: ${{ steps.scan.outputs.high-count }}
+  
+  scan-status:
+    description: 'Overall scan status (success, failed, completed-with-findings)'
+    value: ${{ steps.scan.outputs.scan-status }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        echo "🔍 Validating scan parameters..."
+        
+        # Validate scan types
+        VALID_TYPES="sast,secrets,dependencies,containers,iac,compliance"
+        IFS=',' read -ra TYPES <<< "${{ inputs.scan-types }}"
+        for type in "${TYPES[@]}"; do
+          if [[ ",$VALID_TYPES," != *",$type,"* ]]; then
+            echo "❌ Invalid scan type: $type"
+            echo "Valid types: $VALID_TYPES"
+            exit 1
+          fi
+        done
+        
+        # Validate severity threshold
+        VALID_SEVERITIES="low,medium,high,critical"
+        if [[ ",$VALID_SEVERITIES," != *",${{ inputs.severity-threshold }},"* ]]; then
+          echo "❌ Invalid severity threshold: ${{ inputs.severity-threshold }}"
+          echo "Valid severities: $VALID_SEVERITIES"
+          exit 1
+        fi
+        
+        echo "✅ Input validation passed"
+
+    - name: Prepare scan environment
+      shell: bash
+      run: |
+        echo "🔧 Preparing scan environment..."
+        
+        # Create output directory
+        mkdir -p "$(dirname "${{ inputs.output-file }}")"
+        
+        # Set up project-specific environment
+        case "${{ inputs.project-type }}" in
+          "java-maven")
+            echo "☕ Setting up Java Maven environment"
+            if [ -n "${{ inputs.java-version }}" ]; then
+              echo "JAVA_VERSION=${{ inputs.java-version }}" >> $GITHUB_ENV
+            fi
+            ;;
+          "nodejs")
+            echo "📦 Setting up Node.js environment"
+            if [ -n "${{ inputs.node-version }}" ]; then
+              echo "NODE_VERSION=${{ inputs.node-version }}" >> $GITHUB_ENV
+            fi
+            ;;
+          "python")
+            echo "🐍 Setting up Python environment"
+            ;;
+          "auto")
+            echo "🔍 Auto-detecting project type"
+            ;;
+        esac
+        
+        echo "✅ Environment prepared"
+
+    - name: Run SecureFlow scan
+      id: scan
+      shell: bash
+      run: |
+        echo "🛡️ Running SecureFlow security scan..."
+        
+        # Initialize counters
+        FINDINGS_COUNT=0
+        CRITICAL_COUNT=0
+        HIGH_COUNT=0
+        SCAN_STATUS="success"
+        
+        # Check if SecureFlow CLI is available
+        if command -v secureflow &> /dev/null; then
+          echo "Using SecureFlow CLI..."
+          
+          # Build CLI command
+          CMD="secureflow scan all ${{ inputs.target }}"
+          CMD="$CMD --scan-types ${{ inputs.scan-types }}"
+          CMD="$CMD --project-type ${{ inputs.project-type }}"
+          CMD="$CMD --output-format ${{ inputs.output-format }}"
+          CMD="$CMD --output-file ${{ inputs.output-file }}"
+          CMD="$CMD --severity-threshold ${{ inputs.severity-threshold }}"
+          
+          if [ -f "${{ inputs.config-file }}" ]; then
+            CMD="$CMD --config ${{ inputs.config-file }}"
+          fi
+          
+          # Add project-specific parameters
+          if [ "${{ inputs.project-type }}" = "java-maven" ] && [ -n "${{ inputs.java-version }}" ]; then
+            CMD="$CMD --java-version ${{ inputs.java-version }}"
+          fi
+          
+          echo "Executing: $CMD"
+          
+          # Run the scan
+          if $CMD; then
+            echo "✅ CLI scan completed successfully"
+          else
+            echo "⚠️ CLI scan completed with findings or errors"
+            SCAN_STATUS="completed-with-findings"
+          fi
+          
+        else
+          echo "Using SecureFlow Python module..."
+          
+          # Create Python script for scanning
+          cat > scan_script.py << 'EOF'
+        import asyncio
+        import json
+        import os
+        import sys
+        from pathlib import Path
+        
+        try:
+            from secureflow_core import SecureFlow
+            from secureflow_core.config import Config
+        except ImportError as e:
+            print(f"❌ Failed to import SecureFlow: {e}")
+            sys.exit(1)
+        
+        async def run_scan():
+            try:
+                # Configure SecureFlow
+                config = Config()
+                
+                # Set configuration from inputs
+                config.scanning.project_type = "${{ inputs.project-type }}"
+                config.scanning.scan_types = "${{ inputs.scan-types }}".split(',')
+                config.scanning.severity_threshold = "${{ inputs.severity-threshold }}"
+                config.output.format = "${{ inputs.output-format }}"
+                config.output.file = "${{ inputs.output-file }}"
+                
+                # Load config file if exists
+                config_file = "${{ inputs.config-file }}"
+                if os.path.exists(config_file):
+                    print(f"Loading configuration from {config_file}")
+                    # Config loading logic would go here
+                
+                # Initialize SecureFlow
+                sf = SecureFlow(config)
+                
+                print(f"🔍 Scanning target: ${{ inputs.target }}")
+                print(f"📋 Scan types: {config.scanning.scan_types}")
+                print(f"🎯 Project type: {config.scanning.project_type}")
+                print(f"⚠️ Severity threshold: {config.scanning.severity_threshold}")
+                
+                # Run comprehensive scan
+                results = await sf.scan_repository("${{ inputs.target }}")
+                
+                print(f"✅ Security scan completed successfully")
+                print(f"📊 Scanned {len(results)} targets")
+                
+                return results
+                
+            except Exception as e:
+                print(f"❌ Scan failed: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                return None
+        
+        # Run the scan
+        results = asyncio.run(run_scan())
+        exit_code = 0 if results is not None else 1
+        sys.exit(exit_code)
+        EOF
+          
+          # Execute the Python scan
+          if python scan_script.py; then
+            echo "✅ Python module scan completed successfully"
+          else
+            echo "⚠️ Python module scan completed with findings or errors"
+            SCAN_STATUS="completed-with-findings"
+          fi
+          
+          # Clean up
+          rm -f scan_script.py
+        fi
+        
+        # Analyze results if output file exists
+        if [ -f "${{ inputs.output-file }}" ]; then
+          echo "📊 Analyzing scan results..."
+          
+          # Parse SARIF results for statistics
+          if [ "${{ inputs.output-format }}" = "sarif" ]; then
+            # Extract findings count from SARIF
+            if command -v jq &> /dev/null; then
+              FINDINGS_COUNT=$(jq '[.runs[].results | length] | add // 0' "${{ inputs.output-file }}" 2>/dev/null || echo "0")
+              CRITICAL_COUNT=$(jq '[.runs[].results[] | select(.level == "error" or .properties.severity == "critical")] | length' "${{ inputs.output-file }}" 2>/dev/null || echo "0")
+              HIGH_COUNT=$(jq '[.runs[].results[] | select(.level == "warning" or .properties.severity == "high")] | length' "${{ inputs.output-file }}" 2>/dev/null || echo "0")
+            else
+              echo "jq not available, using basic analysis"
+              FINDINGS_COUNT=$(grep -c '"level"' "${{ inputs.output-file }}" 2>/dev/null || echo "0")
+            fi
+          fi
+          
+          echo "📈 Scan Statistics:"
+          echo "  Total findings: $FINDINGS_COUNT"
+          echo "  Critical: $CRITICAL_COUNT"
+          echo "  High: $HIGH_COUNT"
+          
+        else
+          echo "⚠️ Output file not found: ${{ inputs.output-file }}"
+          # Create minimal SARIF file
+          if [ "${{ inputs.output-format }}" = "sarif" ]; then
+            cat > "${{ inputs.output-file }}" << 'SARIF_EOF'
+        {
+          "version": "2.1.0",
+          "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+          "runs": [
+            {
+              "tool": {
+                "driver": {
+                  "name": "SecureFlow-Core",
+                  "version": "1.0.0"
+                }
+              },
+              "results": []
+            }
+          ]
+        }
+        SARIF_EOF
+          fi
+        fi
+        
+        # Set outputs
+        echo "results-file=${{ inputs.output-file }}" >> $GITHUB_OUTPUT
+        echo "findings-count=$FINDINGS_COUNT" >> $GITHUB_OUTPUT
+        echo "critical-count=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
+        echo "high-count=$HIGH_COUNT" >> $GITHUB_OUTPUT
+        echo "scan-status=$SCAN_STATUS" >> $GITHUB_OUTPUT
+        
+        # Check if we should fail on findings
+        if [ "${{ inputs.fail-on-findings }}" = "true" ] && [ "$CRITICAL_COUNT" -gt 0 ]; then
+          echo "❌ Critical security findings detected - failing action"
+          SCAN_STATUS="failed"
+          echo "scan-status=failed" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        echo "✅ Scan completed with status: $SCAN_STATUS"

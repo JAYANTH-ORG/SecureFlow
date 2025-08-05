@@ -4,9 +4,31 @@ This directory contains GitHub Actions workflows and templates for integrating S
 
 ## 🚀 Quick Start
 
-### 1. Copy a Template
+### Approach 1: Actions-Based (Recommended)
 
-Choose the appropriate template for your project:
+Use reusable GitHub Actions for clean, maintainable workflows:
+
+1. **Copy the actions** to your repository:
+   ```
+   .github/
+   └── actions/
+       ├── setup-secureflow/
+       │   └── action.yml
+       └── secureflow-scan/
+           └── action.yml
+   ```
+
+2. **Use the actions-based template**:
+   - **Java Maven**: `github-actions-templates/java-maven-security-actions.yml`
+
+3. **Update repository reference**:
+   ```yaml
+   secureflow-repo: 'your-org/secureflow-core'
+   ```
+
+### Approach 2: Traditional Templates
+
+Choose a traditional workflow template:
 
 - **Basic Security**: `github-actions-templates/basic-security.yml` - Essential security scanning with auto-detection
 - **Java Maven**: `github-actions-templates/java-maven-security.yml` - Optimized for Maven Java projects with SecureFlow
@@ -20,6 +42,15 @@ Copy the template to `.github/workflows/` in your repository.
 
 Replace `your-org/secureflow-core` with the actual GitHub repository where SecureFlow-Core is hosted:
 
+**Actions-based approach**:
+```yaml
+- name: Setup SecureFlow
+  uses: ./.github/actions/setup-secureflow
+  with:
+    secureflow-repo: 'your-org/secureflow-core'
+```
+
+**Traditional approach**:
 ```yaml
 - name: Install SecureFlow-Core from GitHub
   run: |
@@ -77,13 +108,14 @@ permissions:
 
 ## 📋 Template Quick Reference
 
-| Project Type | Template File | Package Manager | Key Features |
-|-------------|---------------|-----------------|--------------|
-| **Multi-language** | `basic-security.yml` | Auto-detected | 🔍 Auto project detection, basic security scans |
-| **Java Maven** | `java-maven-security.yml` | Maven | ☕ SecureFlow integration, SAST, dependency scanning, SARIF output |
-| **Node.js** | `nodejs-security.yml` | npm/yarn/pnpm | 📦 Package manager detection, license compliance, TypeScript support |
-| **Python** | `python-security.yml` | pip/poetry/pipenv | 🐍 Python-specific tools, virtual environment support |
-| **Container** | `container-security.yml` | Docker | 🐳 Multi-stage scanning, registry integration |
+| Project Type | Template File | Type | Key Features |
+|-------------|---------------|------|--------------|
+| **Multi-language** | `basic-security.yml` | Traditional | 🔍 Auto project detection, basic security scans |
+| **Java Maven** | `java-maven-security.yml` | Traditional | ☕ SecureFlow integration, SAST, dependency scanning, SARIF output |
+| **Java Maven** | `java-maven-security-actions.yml` | **Actions-based** | ☕ Clean actions, reusable components, better maintainability |
+| **Node.js** | `nodejs-security.yml` | Traditional | 📦 Package manager detection, license compliance, TypeScript support |
+| **Python** | `python-security.yml` | Traditional | 🐍 Python-specific tools, virtual environment support |
+| **Container** | `container-security.yml` | Traditional | 🐳 Multi-stage scanning, registry integration |
 
 ## 🔧 Custom Action: setup-secureflow
 

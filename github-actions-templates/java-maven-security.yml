@@ -10,6 +10,7 @@
 # - Integrated SARIF reporting
 #
 # Copy this file to .github/workflows/security.yml in your repository
+# Copy this file to .github/workflows/security.yml in your repository
 
 name: 🛡️ Java Security Scan
 

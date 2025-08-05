@@ -1,0 +1,152 @@
+# Java Maven Security Workflow Template (Actions-Based)
+# Optimized for Maven-based Java projects using SecureFlow-Core actions
+# 
+# This workflow uses reusable GitHub Actions for clean, maintainable security scanning:
+# - setup-secureflow: Installs SecureFlow-Core from GitHub
+# - secureflow-scan: Runs comprehensive security scanning
+# - Automatic SARIF upload and PR comments
+#
+# Copy this file to .github/workflows/security.yml in your repository
+
+name: 🛡️ Java Security Scan (Actions)
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+
+env:
+  MAVEN_OPTS: -Dmaven.repo.local=.m2/repository
+  JAVA_VERSION: '17'
+
+jobs:
+  security:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    
+    permissions:
+      security-events: write
+      contents: read
+      pull-requests: write
+      actions: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+        cache: maven
+
+    - name: Setup SecureFlow
+      uses: ./.github/actions/setup-secureflow
+      with:
+        python-version: '3.11'
+        secureflow-repo: 'your-org/secureflow-core'
+        secureflow-ref: 'main'
+        config-file: '.secureflow.yaml'
+        install-tools: 'true'
+
+    - name: Compile project (for better static analysis)
+      run: |
+        echo "🔨 Compiling Maven project for analysis..."
+        mvn clean compile -DskipTests
+      continue-on-error: true
+
+    - name: Run SecureFlow security scan
+      id: security-scan
+      uses: ./.github/actions/secureflow-scan
+      with:
+        target: '.'
+        project-type: 'java-maven'
+        scan-types: 'sast,secrets,dependencies,containers'
+        severity-threshold: 'medium'
+        output-format: 'sarif'
+        output-file: 'security-results.sarif'
+        java-version: ${{ env.JAVA_VERSION }}
+        fail-on-findings: 'false'
+
+    - name: Upload SARIF results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.security-scan.outputs.results-file }}
+      if: always()
+      continue-on-error: true
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-reports-java-maven
+        path: |
+          ${{ steps.security-scan.outputs.results-file }}
+          security-results/
+          **/target/dependency-check-report.html
+          **/target/spotbugsXml.xml
+        retention-days: 30
+      if: always()
+
+    - name: Comment on PR with results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const scanStatus = '${{ steps.security-scan.outputs.scan-status }}';
+          const findingsCount = '${{ steps.security-scan.outputs.findings-count }}';
+          const criticalCount = '${{ steps.security-scan.outputs.critical-count }}';
+          const highCount = '${{ steps.security-scan.outputs.high-count }}';
+          
+          let summary = "## 🛡️ Java Security Scan Results\n\n";
+          summary += "**Project Type:** Maven Java Project\n";
+          summary += `**Java Version:** ${{ env.JAVA_VERSION }}\n`;
+          summary += `**Scan Status:** ${scanStatus}\n\n`;
+          
+          summary += "### 📊 Security Findings Summary\n";
+          summary += `- **Total Findings:** ${findingsCount}\n`;
+          summary += `- **Critical:** ${criticalCount}\n`;
+          summary += `- **High:** ${highCount}\n\n`;
+          
+          if (scanStatus === 'failed') {
+            summary += "🚨 **Action Failed:** Critical security issues detected!\n\n";
+          } else if (parseInt(findingsCount) > 0) {
+            summary += "⚠️ **Security findings detected.** Please review the detailed reports.\n\n";
+          } else {
+            summary += "✅ **No security issues detected.**\n\n";
+          }
+          
+          summary += "### 🔍 Scans Performed\n";
+          summary += "- 🔍 **Static Analysis (SAST)** - Java code vulnerability detection\n";
+          summary += "- 🔐 **Secret Scanning** - Credential and API key detection\n";
+          summary += "- 📦 **Dependency Analysis** - Maven dependency vulnerability scanning\n";
+          summary += "- 🐳 **Container Scanning** - Docker image security analysis\n\n";
+          summary += "📄 Detailed reports are available in the [Security tab](../../security) and [workflow artifacts](../../actions/runs/${{ github.run_id }}).\n\n";
+          summary += "*Powered by SecureFlow-Core Actions*";
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: summary
+          });
+
+    - name: Security gate check
+      if: steps.security-scan.outputs.scan-status == 'failed'
+      run: |
+        echo "🚨 Security gate failed due to critical findings"
+        echo "Critical findings: ${{ steps.security-scan.outputs.critical-count }}"
+        echo "High findings: ${{ steps.security-scan.outputs.high-count }}"
+        echo "Total findings: ${{ steps.security-scan.outputs.findings-count }}"
+        exit 1
+
+    - name: Success summary
+      if: steps.security-scan.outputs.scan-status != 'failed'
+      run: |
+        echo "✅ Security scan completed successfully"
+        echo "Scan status: ${{ steps.security-scan.outputs.scan-status }}"
+        echo "Total findings: ${{ steps.security-scan.outputs.findings-count }}"
+        echo "Results file: ${{ steps.security-scan.outputs.results-file }}"
