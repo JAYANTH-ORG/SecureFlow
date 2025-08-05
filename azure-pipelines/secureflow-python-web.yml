@@ -1,0 +1,428 @@
+# SecureFlow Python Web Application Security Pipeline
+# Specialized pipeline for Python web applications (Django, FastAPI, Flask)
+# Features: Web-specific security scanning, OWASP checks, API security, dependency scanning
+
+parameters:
+- name: repository_path
+  type: string
+  default: '$(Build.SourcesDirectory)'
+- name: python_version
+  type: string
+  default: '3.11'
+- name: web_framework
+  type: string
+  default: 'auto-detect'
+  values:
+  - 'auto-detect'
+  - 'django'
+  - 'fastapi'
+  - 'flask'
+  - 'generic'
+- name: requirements_file
+  type: string
+  default: 'requirements.txt'
+- name: enable_dast
+  type: boolean
+  default: false
+- name: app_url
+  type: string
+  default: 'http://localhost:8000'
+- name: enable_api_security
+  type: boolean
+  default: true
+- name: compliance_frameworks
+  type: object
+  default: ['OWASP-Top10', 'PCI-DSS']
+
+variables:
+  PIP_CACHE_DIR: $(Pipeline.Workspace)/.pip
+  DJANGO_SETTINGS_MODULE: 'settings.test'
+
+stages:
+- stage: PythonWebSecurityScan
+  displayName: 'Python Web Application Security'
+  jobs:
+  - job: WebAppSecurityScan
+    displayName: 'Web App Security Analysis'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    # Cache Python packages
+    - task: Cache@2
+      inputs:
+        key: 'python | "$(Agent.OS)" | ${{ parameters.requirements_file }}'
+        restoreKeys: |
+          python | "$(Agent.OS)"
+          python
+        path: $(PIP_CACHE_DIR)
+      displayName: 'Cache Python packages'
+
+    # Setup Python
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '${{ parameters.python_version }}'
+        addToPath: true
+      displayName: 'Setup Python ${{ parameters.python_version }}'
+
+    # Detect web framework
+    - script: |
+        echo "🔍 Detecting Python web framework..."
+        
+        FRAMEWORK="${{ parameters.web_framework }}"
+        
+        if [ "$FRAMEWORK" = "auto-detect" ]; then
+          if grep -q "django" ${{ parameters.requirements_file }} 2>/dev/null || [ -f "manage.py" ]; then
+            FRAMEWORK="django"
+            echo "✅ Detected: Django application"
+          elif grep -q "fastapi" ${{ parameters.requirements_file }} 2>/dev/null; then
+            FRAMEWORK="fastapi"
+            echo "✅ Detected: FastAPI application"
+          elif grep -q "flask" ${{ parameters.requirements_file }} 2>/dev/null; then
+            FRAMEWORK="flask"
+            echo "✅ Detected: Flask application"
+          else
+            FRAMEWORK="generic"
+            echo "ℹ️ Generic Python web application detected"
+          fi
+        else
+          echo "📌 Using specified framework: $FRAMEWORK"
+        fi
+        
+        echo "##vso[task.setvariable variable=DETECTED_FRAMEWORK]$FRAMEWORK"
+        echo "Web framework set to: $FRAMEWORK"
+      displayName: 'Detect Web Framework'
+
+    # Install dependencies
+    - script: |
+        echo "📦 Installing Python dependencies..."
+        python -m pip install --upgrade pip setuptools wheel
+        
+        # Install application dependencies
+        if [ -f "${{ parameters.requirements_file }}" ]; then
+          pip install -r ${{ parameters.requirements_file }}
+        elif [ -f "pyproject.toml" ]; then
+          pip install .
+        fi
+        
+        # Install SecureFlow
+        pip install secureflow-core[all]
+        
+        # Install web security tools
+        pip install bandit semgrep safety django-security flask-security
+      displayName: 'Install Dependencies'
+
+    # Framework-specific setup
+    - script: |
+        FRAMEWORK=$(DETECTED_FRAMEWORK)
+        echo "⚙️ Setting up $FRAMEWORK specific configuration..."
+        
+        case $FRAMEWORK in
+          "django")
+            echo "Setting up Django security configuration..."
+            if [ -f "manage.py" ]; then
+              # Django security check
+              python manage.py check --deploy --settings=settings.test 2>/dev/null || true
+            fi
+            ;;
+          "fastapi")
+            echo "Setting up FastAPI security configuration..."
+            # Install FastAPI security tools
+            pip install python-multipart python-jose[cryptography]
+            ;;
+          "flask")
+            echo "Setting up Flask security configuration..."
+            # Install Flask security tools
+            pip install flask-wtf flask-talisman
+            ;;
+        esac
+      displayName: 'Framework-Specific Setup'
+
+    # Python web application SAST
+    - script: |
+        echo "🔍 Running Python Web App SAST Analysis..."
+        
+        # Bandit for Python security issues
+        bandit -r . -f json -o bandit-report.json || true
+        
+        # Semgrep with web-specific rules
+        semgrep --config=auto --json --output=semgrep-web-report.json . || true
+        
+        # Framework-specific security scans
+        FRAMEWORK=$(DETECTED_FRAMEWORK)
+        case $FRAMEWORK in
+          "django")
+            echo "Running Django-specific security checks..."
+            if [ -f "manage.py" ]; then
+              python manage.py check --deploy --tag=security || true
+            fi
+            ;;
+          "fastapi")
+            echo "Running FastAPI security analysis..."
+            # Custom FastAPI security rules
+            semgrep --config=rules.fastapi.security . --json --output=fastapi-security.json || true
+            ;;
+          "flask")
+            echo "Running Flask security analysis..."
+            # Flask-specific security checks
+            semgrep --config=rules.flask.security . --json --output=flask-security.json || true
+            ;;
+        esac
+        
+        # SecureFlow SAST for web apps
+        secureflow scan sast \
+          --target . \
+          --format json \
+          --output web-sast-results.json \
+          --language python \
+          --web-framework $FRAMEWORK
+      displayName: 'Web Application SAST'
+
+    # Dependency vulnerability scanning
+    - script: |
+        echo "🔍 Running Dependency Security Scan..."
+        
+        # Safety for Python package vulnerabilities
+        safety check --json --output safety-report.json || true
+        
+        # Pip-audit for comprehensive dependency scanning
+        if command -v pip-audit >/dev/null 2>&1; then
+          pip-audit --format=json --output=pip-audit-report.json || true
+        else
+          pip install pip-audit
+          pip-audit --format=json --output=pip-audit-report.json || true
+        fi
+        
+        # SecureFlow SCA
+        secureflow scan sca \
+          --target . \
+          --format json \
+          --output web-sca-results.json \
+          --package-manager pip
+      displayName: 'Dependency Security Scan'
+
+    # API security scanning
+    - ${{ if eq(parameters.enable_api_security, true) }}:
+      - script: |
+          echo "🔍 Running API Security Analysis..."
+          
+          # Check for API security best practices
+          secureflow scan api \
+            --target . \
+            --format json \
+            --output api-security-results.json \
+            --framework $(DETECTED_FRAMEWORK)
+          
+          # OWASP API Security Top 10 checks
+          secureflow compliance check \
+            --framework OWASP-API-Top10 \
+            --input-dir . \
+            --output api-compliance.json
+        displayName: 'API Security Analysis'
+
+    # Secret scanning
+    - script: |
+        echo "🔐 Running Secret Scanning..."
+        secureflow scan secrets \
+          --target . \
+          --format json \
+          --output web-secrets-results.json \
+          --exclude-patterns "__pycache__/,*.pyc,venv/,.env"
+      displayName: 'Secret Scanning'
+
+    # OWASP Top 10 compliance check
+    - script: |
+        echo "✅ Running OWASP Top 10 Compliance Check..."
+        secureflow compliance check \
+          --framework OWASP-Top10 \
+          --input-dir . \
+          --output owasp-compliance.json \
+          --web-framework $(DETECTED_FRAMEWORK)
+      displayName: 'OWASP Top 10 Compliance'
+
+    # Generate comprehensive web security report
+    - script: |
+        echo "📊 Generating Web Security Report..."
+        secureflow report generate \
+          --input-dir . \
+          --output-file python-web-security-report.html \
+          --format html \
+          --title "Python Web Application Security Report" \
+          --web-framework $(DETECTED_FRAMEWORK) \
+          --include-owasp-top10 \
+          --include-api-security
+      displayName: 'Generate Web Security Report'
+
+    # Publish artifacts
+    - task: PublishHtmlReport@1
+      inputs:
+        reportDir: '.'
+        tabName: 'Web Security Report'
+      displayName: 'Publish Web Security Report'
+      condition: succeededOrFailed()
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '.'
+        artifactName: 'python-web-security-results'
+        publishLocation: 'Container'
+      displayName: 'Publish Security Artifacts'
+      condition: succeededOrFailed()
+
+- stage: DynamicApplicationSecurity
+  displayName: 'Dynamic Application Security Testing'
+  dependsOn: PythonWebSecurityScan
+  condition: and(succeeded(), eq('${{ parameters.enable_dast }}', true))
+  jobs:
+  - job: DASTScan
+    displayName: 'DAST Security Testing'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '${{ parameters.python_version }}'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    # Install and start application for DAST
+    - script: |
+        echo "🚀 Starting application for DAST..."
+        python -m pip install --upgrade pip
+        
+        if [ -f "${{ parameters.requirements_file }}" ]; then
+          pip install -r ${{ parameters.requirements_file }}
+        fi
+        
+        FRAMEWORK=$(DETECTED_FRAMEWORK)
+        case $FRAMEWORK in
+          "django")
+            if [ -f "manage.py" ]; then
+              python manage.py migrate --run-syncdb || true
+              python manage.py runserver 0.0.0.0:8000 &
+              SERVER_PID=$!
+              echo "##vso[task.setvariable variable=SERVER_PID]$SERVER_PID"
+            fi
+            ;;
+          "fastapi")
+            if [ -f "main.py" ]; then
+              uvicorn main:app --host 0.0.0.0 --port 8000 &
+              SERVER_PID=$!
+              echo "##vso[task.setvariable variable=SERVER_PID]$SERVER_PID"
+            fi
+            ;;
+          "flask")
+            if [ -f "app.py" ]; then
+              python app.py &
+              SERVER_PID=$!
+              echo "##vso[task.setvariable variable=SERVER_PID]$SERVER_PID"
+            fi
+            ;;
+        esac
+        
+        # Wait for application to start
+        sleep 10
+      displayName: 'Start Application'
+
+    # OWASP ZAP DAST scanning
+    - script: |
+        echo "🔍 Running OWASP ZAP DAST Scan..."
+        
+        # Install OWASP ZAP
+        wget -q https://github.com/zaproxy/zaproxy/releases/download/v2.12.0/ZAP_2.12.0_Linux.tar.gz
+        tar -xzf ZAP_2.12.0_Linux.tar.gz
+        
+        # Run ZAP baseline scan
+        ./ZAP_2.12.0/zap.sh -cmd -quickurl ${{ parameters.app_url }} \
+          -quickprogress -quickout zap-baseline-report.html
+        
+        # Run ZAP full scan
+        ./ZAP_2.12.0/zap.sh -cmd -quickurl ${{ parameters.app_url }} \
+          -quickprogress -quickout zap-full-report.html
+      displayName: 'OWASP ZAP DAST Scan'
+
+    # Stop application
+    - script: |
+        echo "🛑 Stopping application..."
+        if [ -n "$(SERVER_PID)" ]; then
+          kill $(SERVER_PID) || true
+        fi
+      displayName: 'Stop Application'
+      condition: always()
+
+    - task: PublishHtmlReport@1
+      inputs:
+        reportDir: '.'
+        tabName: 'DAST Report'
+      displayName: 'Publish DAST Report'
+      condition: succeededOrFailed()
+
+- stage: WebComplianceValidation
+  displayName: 'Web Security Compliance'
+  dependsOn: PythonWebSecurityScan
+  condition: succeeded()
+  jobs:
+  - job: WebCompliance
+    displayName: 'Web Security Compliance Check'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '${{ parameters.python_version }}'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        pip install secureflow-core[all]
+      displayName: 'Install SecureFlow'
+
+    # Download security scan results
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'python-web-security-results'
+        downloadPath: '$(System.ArtifactsDirectory)'
+      displayName: 'Download Security Results'
+
+    # Multi-framework compliance validation
+    - script: |
+        echo "✅ Running Web Security Compliance Checks..."
+        
+        cd "$(System.ArtifactsDirectory)/python-web-security-results"
+        
+        # OWASP Top 10 compliance
+        secureflow compliance check \
+          --framework OWASP-Top10 \
+          --input-dir . \
+          --output compliance-owasp-top10.json
+        
+        # OWASP API Security Top 10
+        secureflow compliance check \
+          --framework OWASP-API-Top10 \
+          --input-dir . \
+          --output compliance-owasp-api.json
+        
+        # PCI DSS web application requirements
+        secureflow compliance check \
+          --framework PCI-DSS-Web \
+          --input-dir . \
+          --output compliance-pci-web.json
+        
+        # Generate consolidated compliance report
+        secureflow compliance report \
+          --input-dir . \
+          --output web-compliance-report.html \
+          --frameworks OWASP-Top10,OWASP-API-Top10,PCI-DSS-Web \
+          --title "Python Web Application Compliance Report"
+      displayName: 'Web Security Compliance Validation'
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '$(System.ArtifactsDirectory)/python-web-security-results'
+        artifactName: 'python-web-compliance-results'
+        publishLocation: 'Container'
+      displayName: 'Publish Compliance Results'

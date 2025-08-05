@@ -1,0 +1,523 @@
+# SecureFlow Container Security Pipeline
+# Comprehensive container and Docker security scanning pipeline
+# Features: Image vulnerability scanning, Dockerfile security, registry scanning, runtime security
+
+parameters:
+- name: repository_path
+  type: string
+  default: '$(Build.SourcesDirectory)'
+- name: dockerfile_path
+  type: string
+  default: 'Dockerfile'
+- name: image_name
+  type: string
+  default: '$(Build.Repository.Name)'
+- name: image_tag
+  type: string
+  default: '$(Build.BuildId)'
+- name: registry_name
+  type: string
+  default: ''
+- name: enable_trivy_scan
+  type: boolean
+  default: true
+- name: enable_grype_scan
+  type: boolean
+  default: true
+- name: enable_clair_scan
+  type: boolean
+  default: false
+- name: enable_docker_bench
+  type: boolean
+  default: true
+- name: fail_on_critical
+  type: boolean
+  default: true
+- name: scan_base_images
+  type: boolean
+  default: true
+- name: enable_runtime_security
+  type: boolean
+  default: false
+
+variables:
+  DOCKER_BUILDKIT: 1
+  TRIVY_CACHE_DIR: $(Pipeline.Workspace)/.trivy
+  GRYPE_DB_CACHE_DIR: $(Pipeline.Workspace)/.grype
+
+stages:
+- stage: ContainerSecurityScan
+  displayName: 'Container Security Analysis'
+  jobs:
+  - job: DockerSecurityScan
+    displayName: 'Docker Security Scanning'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    # Setup Docker and tools
+    - script: |
+        echo "🐳 Setting up Docker security tools..."
+        
+        # Update Docker to latest version
+        sudo apt-get update
+        sudo apt-get install -y docker.io
+        
+        # Install container security tools
+        echo "Installing Trivy..."
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+        echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+        sudo apt-get update
+        sudo apt-get install -y trivy
+        
+        # Install Grype
+        echo "Installing Grype..."
+        curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+        
+        # Install Syft for SBOM generation
+        echo "Installing Syft..."
+        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+        
+        # Install Docker Bench Security
+        echo "Installing Docker Bench Security..."
+        git clone https://github.com/docker/docker-bench-security.git
+        
+        echo "✅ Container security tools installed"
+      displayName: 'Setup Container Security Tools'
+
+    # Setup Python for SecureFlow
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install secureflow-core[all]
+      displayName: 'Install SecureFlow'
+
+    # Dockerfile security analysis
+    - script: |
+        echo "🔍 Analyzing Dockerfile security..."
+        
+        if [ ! -f "${{ parameters.dockerfile_path }}" ]; then
+          echo "❌ Dockerfile not found at ${{ parameters.dockerfile_path }}"
+          exit 1
+        fi
+        
+        # Hadolint for Dockerfile linting
+        if ! command -v hadolint &> /dev/null; then
+          echo "Installing Hadolint..."
+          wget -O hadolint https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64
+          chmod +x hadolint
+          sudo mv hadolint /usr/local/bin/
+        fi
+        
+        echo "Running Hadolint analysis..."
+        hadolint ${{ parameters.dockerfile_path }} --format json > hadolint-report.json || true
+        
+        # SecureFlow Dockerfile analysis
+        secureflow scan dockerfile \
+          --target ${{ parameters.dockerfile_path }} \
+          --format json \
+          --output dockerfile-security.json
+        
+        echo "✅ Dockerfile analysis completed"
+      displayName: 'Dockerfile Security Analysis'
+
+    # Build Docker image with security context
+    - script: |
+        echo "🏗️ Building Docker image with security analysis..."
+        
+        IMAGE_FULL_NAME="${{ parameters.image_name }}:${{ parameters.image_tag }}"
+        
+        # Build with BuildKit for better security
+        DOCKER_BUILDKIT=1 docker build \
+          --progress=plain \
+          --no-cache \
+          --file ${{ parameters.dockerfile_path }} \
+          --tag $IMAGE_FULL_NAME \
+          --label "build.number=$(Build.BuildId)" \
+          --label "build.commit=$(Build.SourceVersion)" \
+          .
+        
+        echo "##vso[task.setvariable variable=BUILT_IMAGE]$IMAGE_FULL_NAME"
+        echo "✅ Docker image built: $IMAGE_FULL_NAME"
+      displayName: 'Build Docker Image'
+
+    # Container image vulnerability scanning with Trivy
+    - ${{ if eq(parameters.enable_trivy_scan, true) }}:
+      - script: |
+          echo "🔍 Running Trivy vulnerability scan..."
+          
+          IMAGE_NAME=$(BUILT_IMAGE)
+          
+          # Create cache directory
+          mkdir -p $(TRIVY_CACHE_DIR)
+          
+          # Scan for vulnerabilities
+          trivy image \
+            --cache-dir $(TRIVY_CACHE_DIR) \
+            --format json \
+            --output trivy-report.json \
+            $IMAGE_NAME
+          
+          # Scan for secrets
+          trivy image \
+            --cache-dir $(TRIVY_CACHE_DIR) \
+            --scanners secret \
+            --format json \
+            --output trivy-secrets.json \
+            $IMAGE_NAME
+          
+          # Scan for misconfigurations
+          trivy image \
+            --cache-dir $(TRIVY_CACHE_DIR) \
+            --scanners config \
+            --format json \
+            --output trivy-config.json \
+            $IMAGE_NAME
+          
+          # Generate HTML report
+          trivy image \
+            --cache-dir $(TRIVY_CACHE_DIR) \
+            --format template \
+            --template "@contrib/html.tpl" \
+            --output trivy-report.html \
+            $IMAGE_NAME
+          
+          echo "✅ Trivy scan completed"
+        displayName: 'Trivy Vulnerability Scan'
+
+    # Container image scanning with Grype
+    - ${{ if eq(parameters.enable_grype_scan, true) }}:
+      - script: |
+          echo "🔍 Running Grype vulnerability scan..."
+          
+          IMAGE_NAME=$(BUILT_IMAGE)
+          
+          # Create cache directory
+          mkdir -p $(GRYPE_DB_CACHE_DIR)
+          
+          # Update Grype database
+          grype db update
+          
+          # Scan for vulnerabilities
+          grype $IMAGE_NAME \
+            --output json \
+            --file grype-report.json
+          
+          # Generate table format for summary
+          grype $IMAGE_NAME \
+            --output table \
+            --file grype-summary.txt
+          
+          echo "✅ Grype scan completed"
+        displayName: 'Grype Vulnerability Scan'
+
+    # Generate SBOM (Software Bill of Materials)
+    - script: |
+        echo "📋 Generating Software Bill of Materials (SBOM)..."
+        
+        IMAGE_NAME=$(BUILT_IMAGE)
+        
+        # Generate SBOM with Syft
+        syft $IMAGE_NAME \
+          --output spdx-json \
+          --file sbom-spdx.json
+        
+        syft $IMAGE_NAME \
+          --output cyclonedx-json \
+          --file sbom-cyclonedx.json
+        
+        # SecureFlow SBOM analysis
+        secureflow scan sbom \
+          --target $IMAGE_NAME \
+          --format json \
+          --output sbom-analysis.json
+        
+        echo "✅ SBOM generation completed"
+      displayName: 'Generate SBOM'
+
+    # Base image security analysis
+    - ${{ if eq(parameters.scan_base_images, true) }}:
+      - script: |
+          echo "🔍 Analyzing base image security..."
+          
+          # Extract base image from Dockerfile
+          BASE_IMAGE=$(grep -i "^FROM" ${{ parameters.dockerfile_path }} | head -1 | awk '{print $2}' | cut -d':' -f1)
+          BASE_TAG=$(grep -i "^FROM" ${{ parameters.dockerfile_path }} | head -1 | awk '{print $2}' | cut -d':' -f2)
+          
+          if [ -z "$BASE_TAG" ] || [ "$BASE_TAG" = "$BASE_IMAGE" ]; then
+            BASE_TAG="latest"
+          fi
+          
+          BASE_IMAGE_FULL="$BASE_IMAGE:$BASE_TAG"
+          
+          echo "Analyzing base image: $BASE_IMAGE_FULL"
+          
+          # Pull base image
+          docker pull $BASE_IMAGE_FULL
+          
+          # Scan base image with Trivy
+          trivy image \
+            --cache-dir $(TRIVY_CACHE_DIR) \
+            --format json \
+            --output base-image-trivy.json \
+            $BASE_IMAGE_FULL
+          
+          # Analyze base image security
+          secureflow scan base-image \
+            --target $BASE_IMAGE_FULL \
+            --format json \
+            --output base-image-analysis.json
+          
+          echo "✅ Base image analysis completed"
+        displayName: 'Base Image Security Analysis'
+
+    # Docker Bench Security test
+    - ${{ if eq(parameters.enable_docker_bench, true) }}:
+      - script: |
+          echo "🔍 Running Docker Bench Security..."
+          
+          cd docker-bench-security
+          
+          # Run Docker Bench Security
+          sudo ./docker-bench-security.sh -l docker-bench-report.log
+          
+          # Convert to JSON format for processing
+          if [ -f "docker-bench-report.log" ]; then
+            cp docker-bench-report.log ../docker-bench-report.txt
+          fi
+          
+          echo "✅ Docker Bench Security completed"
+        displayName: 'Docker Bench Security Test'
+
+    # Container secrets scanning
+    - script: |
+        echo "🔐 Running Container Secrets Scan..."
+        
+        IMAGE_NAME=$(BUILT_IMAGE)
+        
+        # Extract and scan container filesystem
+        CONTAINER_ID=$(docker create $IMAGE_NAME)
+        docker export $CONTAINER_ID | tar -tv > container-files.txt
+        docker rm $CONTAINER_ID
+        
+        # SecureFlow secrets scanning on container
+        secureflow scan secrets \
+          --target $IMAGE_NAME \
+          --format json \
+          --output container-secrets.json \
+          --container-mode
+        
+        echo "✅ Container secrets scan completed"
+      displayName: 'Container Secrets Scanning'
+
+    # Container compliance checks
+    - script: |
+        echo "✅ Running Container Compliance Checks..."
+        
+        # CIS Docker Benchmark compliance
+        secureflow compliance check \
+          --framework CIS-Docker \
+          --input-dir . \
+          --output cis-docker-compliance.json
+        
+        # NIST container security compliance
+        secureflow compliance check \
+          --framework NIST-Container \
+          --input-dir . \
+          --output nist-container-compliance.json
+        
+        echo "✅ Container compliance checks completed"
+      displayName: 'Container Compliance Checks'
+
+    # Generate comprehensive container security report
+    - script: |
+        echo "📊 Generating Container Security Report..."
+        
+        secureflow report generate \
+          --input-dir . \
+          --output-file container-security-report.html \
+          --format html \
+          --title "Container Security Analysis Report" \
+          --include-sbom \
+          --include-base-image-analysis \
+          --include-compliance
+        
+        echo "✅ Container security report generated"
+      displayName: 'Generate Container Security Report'
+
+    # Security gate check
+    - script: |
+        echo "🚦 Running Container Security Gate..."
+        
+        if [ "${{ parameters.fail_on_critical }}" = "True" ]; then
+          secureflow gate check \
+            --input-dir . \
+            --fail-on-severity critical \
+            --max-critical-issues 0 \
+            --container-mode
+        else
+          echo "Security gate disabled - continuing pipeline"
+        fi
+      displayName: 'Container Security Gate'
+
+    # Publish artifacts
+    - task: PublishHtmlReport@1
+      inputs:
+        reportDir: '.'
+        tabName: 'Container Security Report'
+      displayName: 'Publish Container Security Report'
+      condition: succeededOrFailed()
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '.'
+        artifactName: 'container-security-results'
+        publishLocation: 'Container'
+      displayName: 'Publish Security Artifacts'
+      condition: succeededOrFailed()
+
+- stage: RuntimeSecurityAnalysis
+  displayName: 'Runtime Security Analysis'
+  dependsOn: ContainerSecurityScan
+  condition: and(succeeded(), eq('${{ parameters.enable_runtime_security }}', true))
+  jobs:
+  - job: RuntimeSecurity
+    displayName: 'Runtime Security Testing'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        pip install secureflow-core[all]
+      displayName: 'Install SecureFlow'
+
+    # Download container security results
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'container-security-results'
+        downloadPath: '$(System.ArtifactsDirectory)'
+      displayName: 'Download Container Results'
+
+    # Runtime security monitoring setup
+    - script: |
+        echo "🔍 Setting up runtime security monitoring..."
+        
+        IMAGE_NAME=$(BUILT_IMAGE)
+        
+        # Start container with security monitoring
+        CONTAINER_ID=$(docker run -d --name test-container $IMAGE_NAME)
+        
+        echo "##vso[task.setvariable variable=TEST_CONTAINER_ID]$CONTAINER_ID"
+        
+        # Wait for container to start
+        sleep 5
+        
+        # Runtime behavior analysis
+        secureflow scan runtime \
+          --target $CONTAINER_ID \
+          --format json \
+          --output runtime-security.json \
+          --duration 60
+        
+        echo "✅ Runtime security analysis completed"
+      displayName: 'Runtime Security Analysis'
+
+    # Container runtime compliance
+    - script: |
+        echo "✅ Running Runtime Compliance Checks..."
+        
+        cd "$(System.ArtifactsDirectory)/container-security-results"
+        
+        # Runtime security compliance
+        secureflow compliance check \
+          --framework Runtime-Security \
+          --input-dir . \
+          --output runtime-compliance.json
+        
+        # Generate runtime compliance report
+        secureflow compliance report \
+          --input-dir . \
+          --output runtime-compliance-report.html \
+          --frameworks Runtime-Security \
+          --title "Container Runtime Security Compliance"
+      displayName: 'Runtime Compliance Validation'
+
+    # Cleanup containers
+    - script: |
+        echo "🧹 Cleaning up test containers..."
+        if [ -n "$(TEST_CONTAINER_ID)" ]; then
+          docker stop $(TEST_CONTAINER_ID) || true
+          docker rm $(TEST_CONTAINER_ID) || true
+        fi
+      displayName: 'Cleanup Containers'
+      condition: always()
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '$(System.ArtifactsDirectory)/container-security-results'
+        artifactName: 'container-runtime-security-results'
+        publishLocation: 'Container'
+      displayName: 'Publish Runtime Security Results'
+
+- stage: RegistrySecurityScan
+  displayName: 'Container Registry Security'
+  dependsOn: ContainerSecurityScan
+  condition: and(succeeded(), ne('${{ parameters.registry_name }}', ''))
+  jobs:
+  - job: RegistrySecurity
+    displayName: 'Registry Security Scanning'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        pip install secureflow-core[all]
+      displayName: 'Install SecureFlow'
+
+    # Registry security scanning
+    - script: |
+        echo "🔍 Scanning container registry security..."
+        
+        REGISTRY="${{ parameters.registry_name }}"
+        IMAGE_NAME="${{ parameters.image_name }}"
+        
+        # Registry vulnerability scanning
+        secureflow scan registry \
+          --target $REGISTRY/$IMAGE_NAME \
+          --format json \
+          --output registry-security.json
+        
+        # Registry compliance check
+        secureflow compliance check \
+          --framework Registry-Security \
+          --input-dir . \
+          --output registry-compliance.json
+        
+        echo "✅ Registry security scan completed"
+      displayName: 'Registry Security Scan'
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '.'
+        artifactName: 'registry-security-results'
+        publishLocation: 'Container'
+      displayName: 'Publish Registry Security Results'

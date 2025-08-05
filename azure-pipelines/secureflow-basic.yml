@@ -1,5 +1,6 @@
-# SecureFlow Basic Security Pipeline
-# This pipeline provides basic security scanning using SecureFlow-Core
+# SecureFlow Basic Security Pipeline with Multi-Language Support
+# This pipeline provides basic security scanning using SecureFlow-Core with automatic project detection
+# Supports: Java (Maven/Gradle), Node.js (npm/yarn/pnpm), Python, .NET, Go, Rust, and more
 # Usage: Include this template in your azure-pipelines.yml
 
 parameters:
@@ -8,13 +9,28 @@ parameters:
   default: '$(Build.SourcesDirectory)'
 - name: python_version
   type: string
-  default: '3.11'
+  default: '3.13'
 - name: scan_types
   type: object
   default: ['sast', 'sca', 'secrets']
 - name: fail_on_high
   type: boolean
   default: true
+- name: project_type
+  type: string
+  default: 'auto-detect'
+  values:
+  - 'auto-detect'
+  - 'java-maven'
+  - 'java-gradle'
+  - 'nodejs'
+  - 'python'
+  - 'dotnet'
+  - 'go'
+  - 'rust'
+- name: enable_compliance_scan
+  type: boolean
+  default: false
 
 stages:
 - stage: SecurityScan
@@ -26,42 +42,294 @@ stages:
       vmImage: 'ubuntu-latest'
     
     steps:
+    # Project Detection Step
+    - script: |
+        echo "🔍 Detecting project type and configuration..."
+        
+        PROJECT_TYPE="${{ parameters.project_type }}"
+        
+        if [ "$PROJECT_TYPE" = "auto-detect" ]; then
+          if [ -f "pom.xml" ]; then
+            PROJECT_TYPE="java-maven"
+            echo "✅ Detected: Java Maven project"
+          elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+            PROJECT_TYPE="java-gradle"
+            echo "✅ Detected: Java Gradle project"
+          elif [ -f "package.json" ]; then
+            PROJECT_TYPE="nodejs"
+            echo "✅ Detected: Node.js project"
+            
+            # Detect package manager
+            if [ -f "pnpm-lock.yaml" ]; then
+              PACKAGE_MANAGER="pnpm"
+            elif [ -f "yarn.lock" ]; then
+              PACKAGE_MANAGER="yarn"
+            elif [ -f "package-lock.json" ]; then
+              PACKAGE_MANAGER="npm"
+            else
+              PACKAGE_MANAGER="npm"
+            fi
+            echo "📦 Package manager: $PACKAGE_MANAGER"
+            echo "##vso[task.setvariable variable=PACKAGE_MANAGER]$PACKAGE_MANAGER"
+            
+          elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
+            PROJECT_TYPE="python"
+            echo "✅ Detected: Python project"
+          elif [ -f "*.csproj" ] || [ -f "*.sln" ]; then
+            PROJECT_TYPE="dotnet"
+            echo "✅ Detected: .NET project"
+          elif [ -f "go.mod" ]; then
+            PROJECT_TYPE="go"
+            echo "✅ Detected: Go project"
+          elif [ -f "Cargo.toml" ]; then
+            PROJECT_TYPE="rust"
+            echo "✅ Detected: Rust project"
+          else
+            PROJECT_TYPE="generic"
+            echo "ℹ️ Generic project detected"
+          fi
+        else
+          echo "📌 Using specified project type: $PROJECT_TYPE"
+        fi
+        
+        echo "##vso[task.setvariable variable=DETECTED_PROJECT_TYPE]$PROJECT_TYPE"
+        echo "Project type set to: $PROJECT_TYPE"
+      displayName: 'Detect Project Type'
+
+    # Setup project-specific environment
     - task: UsePythonVersion@0
       inputs:
         versionSpec: '${{ parameters.python_version }}'
         addToPath: true
-      displayName: 'Setup Python'
+      displayName: 'Setup Python (SecureFlow)'
+
+    # Java Maven Setup
+    - ${{ if or(eq(parameters.project_type, 'java-maven'), eq(variables['DETECTED_PROJECT_TYPE'], 'java-maven')) }}:
+      - task: JavaToolInstaller@0
+        inputs:
+          versionSpec: '17'
+          jdkArchitectureOption: 'x64'
+          jdkSourceOption: 'PreInstalled'
+        displayName: 'Setup Java 17'
+      
+      - task: Maven@3
+        inputs:
+          mavenPomFile: 'pom.xml'
+          goals: 'clean compile'
+          options: '-DskipTests'
+        displayName: 'Maven Compile (for better analysis)'
+        continueOnError: true
+
+    # Java Gradle Setup
+    - ${{ if or(eq(parameters.project_type, 'java-gradle'), eq(variables['DETECTED_PROJECT_TYPE'], 'java-gradle')) }}:
+      - task: JavaToolInstaller@0
+        inputs:
+          versionSpec: '17'
+          jdkArchitectureOption: 'x64'
+          jdkSourceOption: 'PreInstalled'
+        displayName: 'Setup Java 17'
+      
+      - task: Gradle@2
+        inputs:
+          workingDirectory: ''
+          gradleWrapperFile: 'gradlew'
+          gradleOptions: '-Xmx3072m'
+          javaHomeOption: 'JDKVersion'
+          tasks: 'compileJava'
+        displayName: 'Gradle Compile (for better analysis)'
+        continueOnError: true
+
+    # Node.js Setup
+    - ${{ if or(eq(parameters.project_type, 'nodejs'), eq(variables['DETECTED_PROJECT_TYPE'], 'nodejs')) }}:
+      - task: NodeTool@0
+        inputs:
+          versionSpec: '18'
+        displayName: 'Setup Node.js 18'
+      
+      - script: |
+          PM=$(PACKAGE_MANAGER)
+          if [ -z "$PM" ]; then PM="npm"; fi
+          
+          echo "📦 Installing dependencies with $PM..."
+          case "$PM" in
+            pnpm)
+              npm install -g pnpm
+              pnpm install --frozen-lockfile
+              ;;
+            yarn)
+              npm install -g yarn
+              yarn install --frozen-lockfile
+              ;;
+            npm)
+              npm ci
+              ;;
+          esac
+        displayName: 'Install Node.js Dependencies'
+        continueOnError: true
+
+    # .NET Setup
+    - ${{ if or(eq(parameters.project_type, 'dotnet'), eq(variables['DETECTED_PROJECT_TYPE'], 'dotnet')) }}:
+      - task: UseDotNet@2
+        inputs:
+          packageType: 'sdk'
+          version: '8.x'
+        displayName: 'Setup .NET 8'
+      
+      - script: |
+          dotnet restore
+          dotnet build --no-restore
+        displayName: '.NET Build (for better analysis)'
+        continueOnError: true
+
+    # Go Setup
+    - ${{ if or(eq(parameters.project_type, 'go'), eq(variables['DETECTED_PROJECT_TYPE'], 'go')) }}:
+      - task: GoTool@0
+        inputs:
+          version: '1.21'
+        displayName: 'Setup Go 1.21'
+      
+      - script: |
+          go mod download
+          go build ./...
+        displayName: 'Go Build (for better analysis)'
+        continueOnError: true
 
     - script: |
+        echo "🛡️ Installing SecureFlow-Core v1.0.0..."
         python -m pip install --upgrade pip
         pip install secureflow-core
-      displayName: 'Install SecureFlow'
+        
+        echo "✅ SecureFlow-Core installed successfully"
+        secureflow --version
+      displayName: 'Install SecureFlow-Core'
 
-    # SAST Scanning
+    # Enhanced Security Scanning with Project-Specific Configuration
+    - script: |
+        echo "🔍 Running enhanced security scans..."
+        
+        PROJECT_TYPE=$(DETECTED_PROJECT_TYPE)
+        SCAN_ARGS=""
+        
+        # Configure scan based on detected project type
+        case "$PROJECT_TYPE" in
+          java-maven)
+            echo "📦 Configuring Java Maven-specific scans..."
+            SCAN_ARGS="--maven-project --java-version 17 --include-build-files"
+            ;;
+          java-gradle)
+            echo "📦 Configuring Java Gradle-specific scans..."
+            SCAN_ARGS="--gradle-project --java-version 17 --include-build-files"
+            ;;
+          nodejs)
+            echo "📦 Configuring Node.js-specific scans..."
+            PM=$(PACKAGE_MANAGER)
+            SCAN_ARGS="--nodejs-project --package-manager ${PM:-npm}"
+            
+            # Add TypeScript support if detected
+            if [ -f "tsconfig.json" ] || grep -q "typescript" package.json 2>/dev/null; then
+              SCAN_ARGS="$SCAN_ARGS --typescript"
+              echo "✅ TypeScript support enabled"
+            fi
+            ;;
+          python)
+            echo "📦 Configuring Python-specific scans..."
+            SCAN_ARGS="--python-project"
+            ;;
+          dotnet)
+            echo "📦 Configuring .NET-specific scans..."
+            SCAN_ARGS="--dotnet-project"
+            ;;
+          go)
+            echo "📦 Configuring Go-specific scans..."
+            SCAN_ARGS="--go-project"
+            ;;
+          rust)
+            echo "📦 Configuring Rust-specific scans..."
+            SCAN_ARGS="--rust-project"
+            ;;
+          *)
+            echo "📦 Using generic scan configuration..."
+            SCAN_ARGS="--generic-project"
+            ;;
+        esac
+        
+        echo "##vso[task.setvariable variable=SCAN_ARGS]$SCAN_ARGS"
+        echo "Scan arguments: $SCAN_ARGS"
+      displayName: 'Configure Project-Specific Scanning'
+
+    # Enhanced SAST Scanning
     - ${{ if contains(parameters.scan_types, 'sast') }}:
       - script: |
+          echo "🔍 Running Static Application Security Testing (SAST)..."
           secureflow scan sast ${{ parameters.repository_path }} \
+            $(SCAN_ARGS) \
             --output-format json \
-            --output-file $(Agent.TempDirectory)/sast-results.json
-        displayName: 'Run SAST Scan'
+            --output-file $(Agent.TempDirectory)/sast-results.json \
+            --severity-threshold medium
+        displayName: 'Run Enhanced SAST Scan'
         continueOnError: true
 
-    # SCA Scanning  
+    # Enhanced SCA Scanning  
     - ${{ if contains(parameters.scan_types, 'sca') }}:
       - script: |
+          echo "📦 Running Software Composition Analysis (SCA)..."
           secureflow scan sca ${{ parameters.repository_path }} \
+            $(SCAN_ARGS) \
             --output-format json \
-            --output-file $(Agent.TempDirectory)/sca-results.json
-        displayName: 'Run SCA Scan'
+            --output-file $(Agent.TempDirectory)/sca-results.json \
+            --check-licenses \
+            --severity-threshold medium
+        displayName: 'Run Enhanced SCA Scan'
         continueOnError: true
 
-    # Secrets Scanning
+    # Enhanced Secrets Scanning
     - ${{ if contains(parameters.scan_types, 'secrets') }}:
       - script: |
+          echo "🔐 Running Secrets Detection..."
           secureflow scan secrets ${{ parameters.repository_path }} \
+            $(SCAN_ARGS) \
             --output-format json \
-            --output-file $(Agent.TempDirectory)/secrets-results.json
-        displayName: 'Run Secrets Scan'
+            --output-file $(Agent.TempDirectory)/secrets-results.json \
+            --include-historical
+        displayName: 'Run Enhanced Secrets Scan'
+        continueOnError: true
+
+    # Infrastructure as Code Scanning
+    - ${{ if contains(parameters.scan_types, 'iac') }}:
+      - script: |
+          echo "🏗️ Running Infrastructure as Code (IaC) Scan..."
+          secureflow scan iac ${{ parameters.repository_path }} \
+            $(SCAN_ARGS) \
+            --output-format json \
+            --output-file $(Agent.TempDirectory)/iac-results.json
+        displayName: 'Run IaC Security Scan'
+        continueOnError: true
+
+    # Container Scanning (if Dockerfile present)
+    - ${{ if contains(parameters.scan_types, 'container') }}:
+      - script: |
+          if [ -f "Dockerfile" ] || [ -f "docker-compose.yml" ]; then
+            echo "🐳 Running Container Security Scan..."
+            secureflow scan container ${{ parameters.repository_path }} \
+              $(SCAN_ARGS) \
+              --output-format json \
+              --output-file $(Agent.TempDirectory)/container-results.json
+          else
+            echo "ℹ️ No container files found, skipping container scan"
+          fi
+        displayName: 'Run Container Security Scan'
+        continueOnError: true
+
+    # Compliance Scanning
+    - ${{ if eq(parameters.enable_compliance_scan, true) }}:
+      - script: |
+          echo "📋 Running Compliance Checks..."
+          secureflow compliance check \
+            --frameworks SOC2,PCI-DSS,HIPAA \
+            --input ${{ parameters.repository_path }} \
+            --output-format json \
+            --output-file $(Agent.TempDirectory)/compliance-results.json
+        displayName: 'Run Compliance Checks'
         continueOnError: true
 
     # Generate Report

@@ -1,0 +1,168 @@
+# Java Maven Security Workflow Template
+# Optimized for Maven-based Java projects
+# Copy this file to .github/workflows/security.yml in your repository
+
+name: 🛡️ Java Security Scan
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+
+env:
+  MAVEN_OPTS: -Dmaven.repo.local=.m2/repository
+  JAVA_VERSION: '17'
+
+jobs:
+  security:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    
+    permissions:
+      security-events: write
+      contents: read
+      pull-requests: write
+      actions: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+        cache: maven
+
+    - name: Setup SecureFlow
+      uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
+      with:
+        python-version: '3.11'
+
+    - name: Compile project (for better static analysis)
+      run: |
+        echo "🔨 Compiling Maven project for analysis..."
+        mvn clean compile -DskipTests
+      continue-on-error: true
+
+    - name: Run comprehensive security scans
+      run: |
+        echo "🛡️ Running comprehensive security scans for Maven project..."
+        
+        secureflow scan all . \
+          --scan-types sast,secrets,dependencies,containers \
+          --maven-project \
+          --output-format sarif \
+          --output-file security-results.sarif \
+          --severity-threshold medium \
+          --include-build-files \
+          --java-version ${{ env.JAVA_VERSION }}
+
+    - name: Run Maven-specific security checks
+      run: |
+        echo "🔍 Running Maven-specific security analysis..."
+        
+        # OWASP Dependency Check (if configured)
+        if grep -q "dependency-check-maven" pom.xml; then
+          echo "Running OWASP Dependency Check..."
+          mvn org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7
+        fi
+        
+        # SpotBugs (if configured)
+        if grep -q "spotbugs-maven-plugin" pom.xml; then
+          echo "Running SpotBugs analysis..."
+          mvn spotbugs:check
+        fi
+
+    - name: Upload SARIF results
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: security-results.sarif
+      if: always()
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-reports
+        path: |
+          security-results.sarif
+          **/target/dependency-check-report.html
+          **/target/spotbugsXml.xml
+        retention-days: 30
+      if: always()
+
+    - name: Comment on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          let summary = "## 🛡️ Java Security Scan Results\n\n";
+          summary += "**Project Type:** Maven Java Project\n";
+          summary += `**Java Version:** ${{ env.JAVA_VERSION }}\n\n`;
+          
+          // Try to read SARIF results for summary
+          try {
+            if (fs.existsSync('security-results.sarif')) {
+              const sarif = JSON.parse(fs.readFileSync('security-results.sarif', 'utf8'));
+              const totalRuns = sarif.runs?.length || 0;
+              const totalResults = sarif.runs?.reduce((acc, run) => acc + (run.results?.length || 0), 0) || 0;
+              
+              summary += `### 📊 Scan Summary\n`;
+              summary += `- **Tools Run:** ${totalRuns}\n`;
+              summary += `- **Issues Found:** ${totalResults}\n\n`;
+            }
+          } catch (error) {
+            console.log('Could not parse SARIF results for summary');
+          }
+          
+          summary += "### 🔍 Scans Performed:\n";
+          summary += "- 🔍 **Static Analysis (SAST)** - Java code vulnerability detection\n";
+          summary += "- 🔐 **Secret Scanning** - Credential and API key detection\n";
+          summary += "- 📦 **Dependency Analysis** - Maven dependency vulnerability scanning\n";
+          summary += "- 🐳 **Container Scanning** - Docker image security analysis\n\n";
+          summary += "📄 Detailed reports are available in the [Security tab](../../security) and [workflow artifacts](../../actions/runs/${{ github.run_id }}).\n\n";
+          summary += "*Powered by SecureFlow-Core*";
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: summary
+          });
+
+    - name: Fail on high severity issues
+      run: |
+        echo "🔍 Checking for high severity security issues..."
+        
+        # Parse SARIF results and fail if high/critical issues found
+        if [ -f security-results.sarif ]; then
+          python3 -c "
+        import json
+        import sys
+        
+        with open('security-results.sarif', 'r') as f:
+            sarif = json.load(f)
+        
+        high_severity_count = 0
+        for run in sarif.get('runs', []):
+            for result in run.get('results', []):
+                level = result.get('level', 'note')
+                if level in ['error', 'warning']:  # Map to high/critical
+                    high_severity_count += 1
+        
+        print(f'High/Critical severity issues found: {high_severity_count}')
+        
+        if high_severity_count > 0:
+            print('❌ Security scan failed due to high severity issues')
+            sys.exit(1)
+        else:
+            print('✅ No high severity security issues found')
+        "
+        else
+          echo "⚠️ No SARIF results file found"
+        fi

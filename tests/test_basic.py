@@ -187,7 +187,7 @@ class TestSecureFlow:
                 "safety", ".", "sca", [], 0.5, "2024-01-01T00:00:00Z"
             )
             mock_secrets.return_value = ScanResult(
-                "truffhog", ".", "secrets", [], 0.8, "2024-01-01T00:00:00Z"
+                "trufflehog", ".", "secrets", [], 0.8, "2024-01-01T00:00:00Z"
             )
 
             results = await self.secureflow.scan_repository(".")

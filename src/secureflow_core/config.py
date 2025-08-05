@@ -40,7 +40,7 @@ class ScanningConfig(BaseModel):
     sast_tool: str = Field("semgrep", description="SAST tool to use")
     dast_tool: str = Field("zap", description="DAST tool to use")
     sca_tool: str = Field("safety", description="SCA tool to use")
-    secrets_tool: str = Field("truffhog", description="Secret scanning tool")
+    secrets_tool: str = Field("trufflehog", description="Secret scanning tool")
     iac_tool: str = Field("checkov", description="IaC scanning tool")
     container_tool: str = Field("trivy", description="Container scanning tool")
 

@@ -39,8 +39,8 @@
 
 ### Testing & Quality
 - ✅ **Comprehensive Test Suite** (`tests/test_basic.py`, `tests/test_core.py`)
-  - 19 tests covering core functionality
-  - 35% code coverage
+  - 38 tests covering core functionality
+  - 39% code coverage
   - All tests passing ✅
 - ✅ **Code Formatting** - Black formatting applied
 - ✅ **Dependencies** - All dev dependencies installed and working
@@ -188,7 +188,7 @@ c:\Users\2121659\Shared-libs\
 ## 📈 Success Metrics
 
 - ✅ **Functional**: All core features implemented and tested
-- ✅ **Quality**: 19 tests passing, 35% coverage, linted code
+- ✅ **Quality**: 38 tests passing, 39% coverage, linted code
 - ✅ **Usable**: CLI working, examples provided, documented
 - ✅ **Extensible**: Plugin system, configuration options
 - ✅ **Production-Ready**: Azure DevOps templates, compliance reporting

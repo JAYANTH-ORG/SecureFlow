@@ -389,7 +389,7 @@ class ConfigValidator:
         valid_tools = {
             "sast": ["semgrep", "bandit", "sonarqube"],
             "sca": ["safety", "pip-audit", "npm-audit"],
-            "secrets": ["truffhog", "gitleaks", "detect-secrets"],
+            "secrets": ["trufflehog", "gitleaks", "detect-secrets"],
             "iac": ["checkov", "tfsec", "terrascan"],
             "container": ["trivy", "clair", "anchore"],
         }

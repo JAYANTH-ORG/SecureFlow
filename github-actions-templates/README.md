@@ -8,7 +8,9 @@ This directory contains GitHub Actions workflows and templates for integrating S
 
 Choose the appropriate template for your project:
 
-- **Basic Security**: `github-actions-templates/basic-security.yml` - Essential security scanning
+- **Basic Security**: `github-actions-templates/basic-security.yml` - Essential security scanning with auto-detection
+- **Java Maven**: `github-actions-templates/java-maven-security.yml` - Optimized for Maven Java projects
+- **Node.js Projects**: `github-actions-templates/nodejs-security.yml` - Optimized for npm/yarn/pnpm Node.js projects
 - **Python Projects**: `github-actions-templates/python-security.yml` - Python-specific security analysis
 - **Container Security**: `github-actions-templates/container-security.yml` - Docker/container security scanning
 
@@ -72,6 +74,16 @@ permissions:
 - Weekly schedule (Sundays at 3 AM UTC)
 - Manual dispatch with parameters
 
+## 📋 Template Quick Reference
+
+| Project Type | Template File | Package Manager | Key Features |
+|-------------|---------------|-----------------|--------------|
+| **Multi-language** | `basic-security.yml` | Auto-detected | 🔍 Auto project detection, basic security scans |
+| **Java Maven** | `java-maven-security.yml` | Maven | ☕ Maven-specific, OWASP dependency check, SpotBugs |
+| **Node.js** | `nodejs-security.yml` | npm/yarn/pnpm | 📦 Package manager detection, license compliance, TypeScript support |
+| **Python** | `python-security.yml` | pip/poetry/pipenv | 🐍 Python-specific tools, virtual environment support |
+| **Container** | `container-security.yml` | Docker | 🐳 Multi-stage scanning, registry integration |
+
 ## 🔧 Custom Action: setup-secureflow
 
 **Location**: `.github/actions/setup-secureflow/action.yml`
@@ -113,6 +125,37 @@ permissions:
       --rules "p/python" \
       --exclude-paths "tests/,docs/"
 ```
+
+### For Node.js Projects
+
+1. Copy `github-actions-templates/nodejs-security.yml` to `.github/workflows/nodejs-security.yml`
+2. Update the action reference
+3. The template automatically detects your package manager (npm, yarn, or pnpm)
+
+**Key Features**:
+- 🔍 **Package Manager Detection**: Automatically detects npm, yarn, or pnpm
+- 📦 **Dependency Auditing**: Runs security audits with your package manager
+- 🔧 **TypeScript Support**: Auto-detects and configures TypeScript scanning
+- 📋 **License Compliance**: Checks for problematic licenses
+- 🚨 **Known Vulnerabilities**: Cross-references with CVE databases
+- 🔨 **Build Integration**: Attempts to build project for better analysis
+
+**Customization Example**:
+```yaml
+- name: Run Node.js security scan
+  run: |
+    secureflow scan all . \
+      --nodejs-project \
+      --typescript \
+      --package-manager npm \
+      --severity-threshold medium \
+      --include-build-files
+```
+
+**Package Manager Support**:
+- **npm**: Uses `npm ci` and `npm audit`
+- **Yarn**: Uses `yarn install --frozen-lockfile` and `yarn audit`
+- **pnpm**: Uses `pnpm install --frozen-lockfile` and `pnpm audit`
 
 ### For Container Projects
 

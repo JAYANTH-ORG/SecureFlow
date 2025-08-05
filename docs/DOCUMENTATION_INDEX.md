@@ -11,7 +11,7 @@ SecureFlow-Core is a **comprehensive, production-ready DevSecOps library** provi
 ### **Primary Documentation**
 | Document | Purpose | Audience |
 |----------|---------|----------|
-| **[README.md](./README.md)** | Main project overview and quick start | All users |
+| **[README.md](../README.md)** | Main project overview and quick start | All users |
 | **[USAGE_GUIDE.md](./USAGE_GUIDE.md)** | Detailed usage scenarios and examples | Developers, DevOps |
 | **[COMPREHENSIVE_ANALYSIS.md](./COMPREHENSIVE_ANALYSIS.md)** | Deep technical analysis and roadmap | Technical leaders, Architects |
 
@@ -26,8 +26,8 @@ SecureFlow-Core is a **comprehensive, production-ready DevSecOps library** provi
 | Document | Purpose | Audience |
 |----------|---------|----------|
 | **[COMPATIBILITY_GUIDE.md](./COMPATIBILITY_GUIDE.md)** | Backward compatibility information | DevOps engineers |
-| **[examples/README.md](./examples/README.md)** | Code examples and integrations | Developers |
-| **[github-actions-templates/README.md](./github-actions-templates/README.md)** | GitHub Actions integration guide | GitHub users |
+| **[examples/README.md](../examples/README.md)** | Code examples and integrations | Developers |
+| **[github-actions-templates/README.md](../github-actions-templates/README.md)** | GitHub Actions integration guide | GitHub users |
 
 ---
 
@@ -35,7 +35,7 @@ SecureFlow-Core is a **comprehensive, production-ready DevSecOps library** provi
 
 ### **👩‍💻 Developers**
 **Getting Started:**
-1. 📖 [README.md](./README.md) - Quick start and installation
+1. 📖 [README.md](../README.md) - Quick start and installation
 2. 🎯 [QUICK_REFERENCE.md](./QUICK_REFERENCE.md) - Command reference
 3. 💻 [examples/basic_usage.py](./examples/basic_usage.py) - Code examples
 
@@ -107,7 +107,7 @@ SecureFlow-Core is a **comprehensive, production-ready DevSecOps library** provi
 ## 📊 Project Metrics & Status
 
 ### **📈 Current Status**
-- ✅ **Tests**: 19 passing tests, 35% coverage
+- ✅ **Tests**: 38 passing tests, 39% coverage
 - 🏗️ **Architecture**: Modern async Python 3.8+
 - 🔧 **Tools**: 40+ security tools supported
 - 📋 **Languages**: 19 programming languages
@@ -167,7 +167,7 @@ pip install secureflow-core
 secureflow init
 secureflow scan all .
 ```
-**Documentation**: [README.md](./README.md)
+**Documentation**: [README.md](../README.md)
 
 ### **🔧 Basic Integration (30 minutes)**
 1. Configure `.secureflow.yaml`

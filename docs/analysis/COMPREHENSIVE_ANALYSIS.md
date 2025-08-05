@@ -5,7 +5,7 @@
 SecureFlow-Core is a **production-ready, enterprise-grade DevSecOps library** designed to provide comprehensive security scanning, compliance automation, and seamless CI/CD integration. Built with modern Python async architecture, it supports **19 programming languages**, **5 major security scan types**, and integrates with **Azure DevOps** and **GitHub Actions** with full backward compatibility.
 
 ### **Key Metrics**
-- ✅ **19 Tests Passing** with 35% code coverage
+- ✅ **38 Tests Passing** with 39% code coverage
 - 🚀 **Sub-10 second** initialization time
 - 🔧 **40+ Security Tools** supported through plugins
 - 📊 **15+ Report Formats** (HTML, JSON, SARIF, XML, PDF)

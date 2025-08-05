@@ -1,0 +1,429 @@
+# SecureFlow Node.js Security Pipeline
+# Optimized Azure DevOps pipeline for Node.js projects
+# Features: npm/yarn/pnpm support, TypeScript, license compliance, audit integration
+
+parameters:
+- name: repository_path
+  type: string
+  default: '$(Build.SourcesDirectory)'
+- name: node_version
+  type: string
+  default: '18'
+- name: package_manager
+  type: string
+  default: 'auto-detect'
+  values:
+  - 'auto-detect'
+  - 'npm'
+  - 'yarn'
+  - 'pnpm'
+- name: run_build
+  type: boolean
+  default: true
+- name: enable_license_check
+  type: boolean
+  default: true
+- name: audit_level
+  type: string
+  default: 'moderate'
+  values:
+  - 'info'
+  - 'low'
+  - 'moderate'
+  - 'high'
+  - 'critical'
+- name: fail_on_audit_issues
+  type: boolean
+  default: true
+
+variables:
+  NPM_CONFIG_CACHE: $(Pipeline.Workspace)/.npm
+  YARN_CACHE_FOLDER: $(Pipeline.Workspace)/.yarn
+  PNPM_CACHE_FOLDER: $(Pipeline.Workspace)/.pnpm
+
+stages:
+- stage: NodeJSSecurityScan
+  displayName: 'Node.js Security Analysis'
+  jobs:
+  - job: NodeSecurityScan
+    displayName: 'Node.js Security Scan'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    # Setup Node.js environment
+    - task: NodeTool@0
+      inputs:
+        versionSpec: '${{ parameters.node_version }}'
+      displayName: 'Setup Node.js ${{ parameters.node_version }}'
+
+    # Setup Python for SecureFlow
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.13'
+        addToPath: true
+      displayName: 'Setup Python (SecureFlow)'
+
+    # Detect package manager and project configuration
+    - script: |
+        echo "🔍 Analyzing Node.js project structure..."
+        
+        if [ ! -f "package.json" ]; then
+          echo "❌ No package.json found - not a Node.js project"
+          exit 1
+        fi
+        
+        # Extract project information
+        PROJECT_NAME=$(node -e "console.log(require('./package.json').name || 'unknown')")
+        PROJECT_VERSION=$(node -e "console.log(require('./package.json').version || '1.0.0')")
+        
+        echo "📦 Project: $PROJECT_NAME"
+        echo "🏷️ Version: $PROJECT_VERSION"
+        
+        # Detect package manager
+        PACKAGE_MANAGER="${{ parameters.package_manager }}"
+        
+        if [ "$PACKAGE_MANAGER" = "auto-detect" ]; then
+          if [ -f "pnpm-lock.yaml" ]; then
+            PACKAGE_MANAGER="pnpm"
+            echo "✅ Detected: pnpm (pnpm-lock.yaml found)"
+          elif [ -f "yarn.lock" ]; then
+            PACKAGE_MANAGER="yarn"
+            echo "✅ Detected: Yarn (yarn.lock found)"
+          elif [ -f "package-lock.json" ]; then
+            PACKAGE_MANAGER="npm"
+            echo "✅ Detected: npm (package-lock.json found)"
+          else
+            PACKAGE_MANAGER="npm"
+            echo "ℹ️ No lock file found, defaulting to npm"
+          fi
+        else
+          echo "📌 Using specified package manager: $PACKAGE_MANAGER"
+        fi
+        
+        # Detect TypeScript
+        if [ -f "tsconfig.json" ] || node -e "const pkg=require('./package.json'); process.exit(pkg.dependencies?.typescript || pkg.devDependencies?.typescript ? 0 : 1)" 2>/dev/null; then
+          TYPESCRIPT_ENABLED="true"
+          echo "✅ TypeScript project detected"
+        else
+          TYPESCRIPT_ENABLED="false"
+          echo "ℹ️ JavaScript project (no TypeScript)"
+        fi
+        
+        # Count dependencies
+        DEPS_COUNT=$(node -e "console.log(Object.keys(require('./package.json').dependencies || {}).length)")
+        DEV_DEPS_COUNT=$(node -e "console.log(Object.keys(require('./package.json').devDependencies || {}).length)")
+        
+        echo "📊 Dependencies: $DEPS_COUNT runtime, $DEV_DEPS_COUNT development"
+        
+        # Set variables for subsequent steps
+        echo "##vso[task.setvariable variable=PROJECT_NAME]$PROJECT_NAME"
+        echo "##vso[task.setvariable variable=PROJECT_VERSION]$PROJECT_VERSION"
+        echo "##vso[task.setvariable variable=PACKAGE_MANAGER]$PACKAGE_MANAGER"
+        echo "##vso[task.setvariable variable=TYPESCRIPT_ENABLED]$TYPESCRIPT_ENABLED"
+        echo "##vso[task.setvariable variable=DEPS_COUNT]$DEPS_COUNT"
+        echo "##vso[task.setvariable variable=DEV_DEPS_COUNT]$DEV_DEPS_COUNT"
+      displayName: 'Analyze Node.js Project'
+
+    # Cache dependencies based on package manager
+    - task: Cache@2
+      inputs:
+        key: 'npm | "$(Agent.OS)" | package-lock.json'
+        restoreKeys: |
+          npm | "$(Agent.OS)"
+        path: $(NPM_CONFIG_CACHE)
+      displayName: 'Cache npm Dependencies'
+      condition: eq(variables['PACKAGE_MANAGER'], 'npm')
+
+    - task: Cache@2
+      inputs:
+        key: 'yarn | "$(Agent.OS)" | yarn.lock'
+        restoreKeys: |
+          yarn | "$(Agent.OS)"
+        path: $(YARN_CACHE_FOLDER)
+      displayName: 'Cache Yarn Dependencies'
+      condition: eq(variables['PACKAGE_MANAGER'], 'yarn')
+
+    - task: Cache@2
+      inputs:
+        key: 'pnpm | "$(Agent.OS)" | pnpm-lock.yaml'
+        restoreKeys: |
+          pnpm | "$(Agent.OS)"
+        path: $(PNPM_CACHE_FOLDER)
+      displayName: 'Cache pnpm Dependencies'
+      condition: eq(variables['PACKAGE_MANAGER'], 'pnpm')
+
+    # Install dependencies
+    - script: |
+        echo "📦 Installing dependencies with $(PACKAGE_MANAGER)..."
+        
+        case "$(PACKAGE_MANAGER)" in
+          pnpm)
+            npm install -g pnpm
+            pnpm config set store-dir $(PNPM_CACHE_FOLDER)
+            pnpm install --frozen-lockfile
+            ;;
+          yarn)
+            npm install -g yarn
+            yarn config set cache-folder $(YARN_CACHE_FOLDER)
+            yarn install --frozen-lockfile
+            ;;
+          npm)
+            npm config set cache $(NPM_CONFIG_CACHE)
+            if [ -f "package-lock.json" ]; then
+              npm ci
+            else
+              npm install
+            fi
+            ;;
+        esac
+        
+        echo "✅ Dependencies installed successfully"
+      displayName: 'Install Dependencies'
+
+    # Install SecureFlow-Core
+    - script: |
+        echo "🛡️ Installing SecureFlow-Core..."
+        python -m pip install --upgrade pip
+        pip install secureflow-core
+        
+        echo "✅ SecureFlow-Core installed"
+        secureflow --version
+      displayName: 'Install SecureFlow-Core'
+
+    # Run package manager security audit
+    - script: |
+        echo "🔍 Running $(PACKAGE_MANAGER) security audit..."
+        
+        case "$(PACKAGE_MANAGER)" in
+          pnpm)
+            pnpm audit --audit-level ${{ parameters.audit_level }} | tee $(Agent.TempDirectory)/audit-results.txt
+            AUDIT_EXIT_CODE=$?
+            ;;
+          yarn)
+            yarn audit --level ${{ parameters.audit_level }} | tee $(Agent.TempDirectory)/audit-results.txt
+            AUDIT_EXIT_CODE=$?
+            ;;
+          npm)
+            npm audit --audit-level ${{ parameters.audit_level }} | tee $(Agent.TempDirectory)/audit-results.txt
+            AUDIT_EXIT_CODE=$?
+            ;;
+        esac
+        
+        if [ $AUDIT_EXIT_CODE -eq 0 ]; then
+          echo "✅ No security vulnerabilities found"
+          echo "##vso[task.setvariable variable=AUDIT_PASSED]true"
+        else
+          echo "⚠️ Security vulnerabilities detected"
+          echo "##vso[task.setvariable variable=AUDIT_PASSED]false"
+        fi
+        
+        # Generate detailed audit report
+        case "$(PACKAGE_MANAGER)" in
+          pnpm)
+            pnpm audit --json > $(Agent.TempDirectory)/audit-detailed.json || true
+            ;;
+          yarn)
+            yarn audit --json > $(Agent.TempDirectory)/audit-detailed.json || true
+            ;;
+          npm)
+            npm audit --json > $(Agent.TempDirectory)/audit-detailed.json || true
+            ;;
+        esac
+      displayName: 'Package Manager Security Audit'
+      continueOnError: true
+
+    # Build project (if enabled)
+    - ${{ if eq(parameters.run_build, true) }}:
+      - script: |
+          echo "🔨 Building Node.js project..."
+          
+          # Try different build commands
+          if npm run build 2>/dev/null; then
+            echo "✅ Built successfully with 'npm run build'"
+          elif npm run compile 2>/dev/null; then
+            echo "✅ Built successfully with 'npm run compile'"
+          elif [ "$(TYPESCRIPT_ENABLED)" = "true" ] && npx tsc 2>/dev/null; then
+            echo "✅ Built successfully with TypeScript compiler"
+          else
+            echo "ℹ️ No build script found or build failed - continuing with source analysis"
+          fi
+        displayName: 'Build Project'
+        continueOnError: true
+
+    # Run comprehensive Node.js security scanning
+    - script: |
+        echo "🔍 Running comprehensive Node.js security analysis..."
+        
+        SCAN_ARGS="--nodejs-project --package-manager $(PACKAGE_MANAGER)"
+        
+        if [ "$(TYPESCRIPT_ENABLED)" = "true" ]; then
+          SCAN_ARGS="$SCAN_ARGS --typescript"
+          echo "✅ TypeScript scanning enabled"
+        fi
+        
+        secureflow scan all ${{ parameters.repository_path }} \
+          $SCAN_ARGS \
+          --node-version ${{ parameters.node_version }} \
+          --output-format json \
+          --output-file $(Agent.TempDirectory)/nodejs-security-results.json \
+          --severity-threshold medium \
+          --include-build-files
+        
+        echo "✅ Node.js security scan completed"
+      displayName: 'Run Node.js Security Scan'
+      continueOnError: true
+
+    # License compliance check
+    - ${{ if eq(parameters.enable_license_check, true) }}:
+      - script: |
+          echo "📋 Running license compliance check..."
+          
+          # Install license checker if not present
+          if ! npm list -g license-checker 2>/dev/null; then
+            npm install -g license-checker
+          fi
+          
+          # Generate license report
+          npx license-checker --json --out $(Agent.TempDirectory)/licenses.json
+          
+          # Check for problematic licenses
+          npx license-checker --failOn 'GPL-2.0;GPL-3.0;AGPL-1.0;AGPL-3.0' --summary | tee $(Agent.TempDirectory)/license-check.txt
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ License compliance check passed"
+          else
+            echo "⚠️ Potential license compliance issues detected"
+          fi
+        displayName: 'License Compliance Check'
+        continueOnError: true
+
+    # Additional security tools
+    - script: |
+        echo "🔍 Running additional Node.js security tools..."
+        
+        # ESLint security plugin (if available)
+        if npm list eslint-plugin-security 2>/dev/null; then
+          echo "Running ESLint security analysis..."
+          npx eslint . --ext .js,.ts,.jsx,.tsx --format json --output-file $(Agent.TempDirectory)/eslint-security.json || true
+        fi
+        
+        # Semgrep for JavaScript/TypeScript
+        if command -v semgrep >/dev/null 2>&1; then
+          echo "Running Semgrep analysis..."
+          semgrep --config=auto --json --output=$(Agent.TempDirectory)/semgrep-results.json . || true
+        fi
+        
+        # Generate dependency tree
+        npm ls --json > $(Agent.TempDirectory)/dependency-tree.json 2>/dev/null || true
+        
+        echo "✅ Additional security analysis completed"
+      displayName: 'Additional Security Analysis'
+      continueOnError: true
+
+    # Generate comprehensive security report
+    - script: |
+        echo "📊 Generating comprehensive security report..."
+        
+        secureflow report generate \
+          --input $(Agent.TempDirectory)/*-results.json \
+          --format html,xml,sarif \
+          --output $(Agent.TempDirectory)/nodejs-security-report \
+          --project-name "$(PROJECT_NAME)" \
+          --project-version "$(PROJECT_VERSION)" \
+          --project-type "Node.js" \
+          --package-manager "$(PACKAGE_MANAGER)" \
+          --typescript "$(TYPESCRIPT_ENABLED)" \
+          --include-remediation
+        
+        echo "✅ Security report generated"
+      displayName: 'Generate Security Report'
+      continueOnError: true
+
+    # Publish test results
+    - task: PublishTestResults@2
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: |
+          $(Agent.TempDirectory)/**/test-results.xml
+          test-results.xml
+          coverage/junit.xml
+        mergeTestResults: true
+        failTaskOnFailedTests: false
+        testRunTitle: 'Node.js Security Test Results'
+      displayName: 'Publish Test Results'
+      condition: succeededOrFailed()
+
+    # Publish security artifacts
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: '$(Agent.TempDirectory)'
+        artifactName: 'nodejs-security-reports'
+        publishLocation: 'Container'
+      displayName: 'Publish Security Reports'
+      condition: succeededOrFailed()
+
+    # Create work items for critical issues
+    - script: |
+        echo "🚨 Creating work items for critical security issues..."
+        
+        secureflow azure create-work-items \
+          --input $(Agent.TempDirectory)/*-results.json \
+          --severity critical,high \
+          --project $(System.TeamProject) \
+          --area-path "Security/NodeJS" \
+          --iteration $(System.TeamProject) \
+          --assigned-to $(Build.RequestedForEmail) \
+          --tags "security,nodejs,$(PACKAGE_MANAGER),automated"
+        
+        echo "✅ Work items created for critical issues"
+      displayName: 'Create Security Work Items'
+      condition: succeededOrFailed()
+      env:
+        AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)
+
+    # Security gate - fail build on audit issues
+    - script: |
+        echo "🚪 Evaluating security gate..."
+        
+        if [ "$(AUDIT_PASSED)" = "false" ] && [ "${{ parameters.fail_on_audit_issues }}" = "true" ]; then
+          echo "❌ Build failed due to package manager audit issues"
+          exit 1
+        fi
+        
+        # Parse SecureFlow results for critical issues
+        python -c "
+import json
+import sys
+import glob
+
+critical_count = 0
+high_count = 0
+
+for file_path in glob.glob('$(Agent.TempDirectory)/*-results.json'):
+    try:
+        with open(file_path, 'r') as f:
+            results = json.load(f)
+            
+        for vuln in results.get('vulnerabilities', []):
+            severity = vuln.get('severity', '').lower()
+            if severity == 'critical':
+                critical_count += 1
+            elif severity == 'high':
+                high_count += 1
+    except Exception as e:
+        print(f'Warning: Could not parse {file_path}: {e}')
+
+print(f'Critical issues: {critical_count}')
+print(f'High severity issues: {high_count}')
+
+if critical_count > 0:
+    print('❌ Build failed due to critical security issues')
+    sys.exit(1)
+elif high_count > 15:  # Allow up to 15 high severity issues for Node.js
+    print('❌ Build failed due to too many high severity issues')
+    sys.exit(1)
+else:
+    print('✅ Security gate passed')
+"
+      displayName: 'Security Gate Evaluation'
