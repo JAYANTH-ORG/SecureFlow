@@ -11,7 +11,7 @@ import os
 def test_json_generation():
     """Test the JSON generation logic from the workflow"""
     
-    print("🧪 Testing JSON generation from workflow logic...")
+    print("Testing JSON generation from workflow logic...")
     
     # Simulate the bash script that generates the JSON
     test_script = '''#!/bin/bash
@@ -60,17 +60,17 @@ EOF
             "notification_level": "high"
         }
         
-        print("✅ Expected JSON structure:")
+        print("Expected JSON structure:")
         print(json.dumps(expected_json, indent=2))
         
         # Test JSON parsing
         try:
             json_str = json.dumps(expected_json)
             parsed = json.loads(json_str)
-            print("✅ JSON parsing successful!")
+            print("JSON parsing successful!")
             return True
         except json.JSONDecodeError as e:
-            print(f"❌ JSON parsing failed: {e}")
+            print(f"JSON parsing failed: {e}")
             return False
             
     finally:
@@ -81,7 +81,7 @@ EOF
 def test_problematic_json():
     """Test the problematic JSON format that was causing issues"""
     
-    print("\n🧪 Testing problematic JSON format...")
+    print("\nTesting problematic JSON format...")
     
     # This is what was being generated before (with leading spaces)
     problematic_json = '''        {
@@ -92,21 +92,21 @@ def test_problematic_json():
           "notification_level": "high"
         }'''
     
-    print("❌ Problematic JSON (with leading spaces):")
+    print("Problematic JSON (with leading spaces):")
     print(repr(problematic_json))
     
     try:
         json.loads(problematic_json)
-        print("😲 Unexpected: Problematic JSON parsed successfully!")
+        print("Unexpected: Problematic JSON parsed successfully!")
         return False
     except json.JSONDecodeError as e:
-        print(f"✅ Expected: JSON parsing failed: {e}")
+        print(f"Expected: JSON parsing failed: {e}")
         return True
 
 def test_fixed_json():
     """Test the fixed JSON format"""
     
-    print("\n🧪 Testing fixed JSON format...")
+    print("\nTesting fixed JSON format...")
     
     # This is what should be generated now (no leading spaces)
     fixed_json = '''{
@@ -117,20 +117,20 @@ def test_fixed_json():
 "notification_level": "high"
 }'''
     
-    print("✅ Fixed JSON (no leading spaces):")
+    print("Fixed JSON (no leading spaces):")
     print(fixed_json)
     
     try:
         parsed = json.loads(fixed_json)
-        print("✅ JSON parsing successful!")
-        print("✅ Parsed data:", parsed)
+        print("JSON parsing successful!")
+        print("Parsed data:", parsed)
         return True
     except json.JSONDecodeError as e:
-        print(f"❌ JSON parsing failed: {e}")
+        print(f"JSON parsing failed: {e}")
         return False
 
 if __name__ == "__main__":
-    print("🔍 Testing JSON Generation Logic")
+    print("Testing JSON Generation Logic")
     print("=" * 50)
     
     test1 = test_json_generation()
@@ -138,12 +138,12 @@ if __name__ == "__main__":
     test3 = test_fixed_json()
     
     print("\n" + "=" * 50)
-    print("📊 Test Results:")
-    print(f"✅ Expected JSON structure: {'PASS' if test1 else 'FAIL'}")
-    print(f"✅ Problematic JSON fails: {'PASS' if test2 else 'FAIL'}")
-    print(f"✅ Fixed JSON succeeds: {'PASS' if test3 else 'FAIL'}")
+    print("Test Results:")
+    print(f"Expected JSON structure: {'PASS' if test1 else 'FAIL'}")
+    print(f"Problematic JSON fails: {'PASS' if test2 else 'FAIL'}")
+    print(f"Fixed JSON succeeds: {'PASS' if test3 else 'FAIL'}")
     
     if all([test1, test2, test3]):
-        print("\n🎉 All tests passed! JSON generation is now correct.")
+        print("\nAll tests passed! JSON generation is now correct.")
     else:
-        print("\n❌ Some tests failed. Check the JSON formatting.")
+        print("\nSome tests failed. Check the JSON formatting.")

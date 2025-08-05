@@ -31,7 +31,7 @@ def simulate_matrix_generation():
     ]
     
     for test in test_cases:
-        print(f"\n🧪 Test: {test['name']}")
+        print(f"\nTest: {test['name']}")
         print(f"Files: {test['files']}")
         
         # Simulate the detection logic
@@ -62,13 +62,13 @@ def simulate_matrix_generation():
         
         # Verify
         if scan_types == test['expected'] or (len(scan_types) == 0 and test['expected'] == ["general"]):
-            print("✅ PASS")
+            print("PASS")
         else:
             print("❌ FAIL")
 
 if __name__ == "__main__":
-    print("🔍 Testing Matrix Generation Logic")
+    print("Testing Matrix Generation Logic")
     print("=" * 50)
     simulate_matrix_generation()
     print("\n" + "=" * 50)
-    print("✅ Matrix generation testing complete!")
+    print("Matrix generation testing complete!")

@@ -43,7 +43,7 @@ def main():
         '.github/workflows/security-compatible.yml'
     ]
     
-    print("🔍 Analyzing GitHub Actions in workflow files...")
+    print("Analyzing GitHub Actions in workflow files...")
     print("=" * 70)
     
     all_actions = {}
@@ -68,7 +68,7 @@ def main():
                     print(f"  ℹ️  {action}")
     
     print("\n" + "=" * 70)
-    print("📊 Summary of all actions used:")
+    print("Summary of all actions used:")
     
     deprecated_found = False
     for action, locations in sorted(all_actions.items()):
@@ -85,7 +85,7 @@ def main():
         print("❌ DEPRECATED ACTIONS FOUND - Update required!")
         return 1
     else:
-        print("✅ All actions are using current versions!")
+        print("All actions are using current versions!")
         return 0
 
 if __name__ == "__main__":

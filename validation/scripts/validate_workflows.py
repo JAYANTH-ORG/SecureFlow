@@ -107,7 +107,7 @@ def validate_workflow_file(file_path):
     print(f"Validating: {file_path}")
     
     if not os.path.exists(file_path):
-        print(f"❌ File not found: {file_path}")
+        print(f"File not found: {file_path}")
         return False
     
     try:
@@ -119,7 +119,7 @@ def validate_workflow_file(file_path):
         
         # Basic structure validation
         if not isinstance(yaml_content, dict):
-            print(f"❌ Invalid structure: {file_path}")
+            print(f"Invalid structure: {file_path}")
             return False
         
         # Check for GitHub Actions specific issues
@@ -130,40 +130,44 @@ def validate_workflow_file(file_path):
         issues += issues  # Add any issues from transitive dependency checks
         
         if issues:
-            print(f"⚠️  Potential issues in {file_path}:")
+            print(f"Potential issues in {file_path}:")
             for issue in issues:
                 print(f"   {issue}")
         
         if warnings:
-            print(f"⚠️  Warnings in {file_path}:")
+            print(f"Warnings in {file_path}:")
             for warning in warnings:
                 print(f"   {warning}")
         
         # Check for required GitHub Actions fields
         # Note: YAML parser interprets 'on:' as boolean True, not string 'on'
         if 'on' not in yaml_content and True not in yaml_content:
-            print(f"⚠️  Warning: No 'on' trigger found in {file_path}")
+            print(f"Warning: No 'on' trigger found in {file_path}")
         elif True in yaml_content:
             # YAML interpreted 'on:' as boolean True - this is expected
-            print(f"ℹ️  Found 'on' trigger (parsed as boolean True due to YAML 1.1 spec)")
+            print(f"Info: Found 'on' trigger (parsed as boolean True due to YAML 1.1 spec)")
         
         if 'jobs' in yaml_content:
             job_count = len(yaml_content['jobs'])
-            print(f"✅ {file_path} - Valid YAML with {job_count} jobs")
+            print(f"{file_path} - Valid YAML with {job_count} jobs")
         else:
-            print(f"✅ {file_path} - Valid YAML (no jobs section)")
+            print(f"{file_path} - Valid YAML (no jobs section)")
         
         return len(issues) == 0
         
     except yaml.YAMLError as e:
-        print(f"❌ YAML Error in {file_path}: {e}")
+        print(f"YAML Error in {file_path}: {e}")
         return False
     except Exception as e:
-        print(f"❌ Error reading {file_path}: {e}")
+        print(f"Error reading {file_path}: {e}")
         return False
 
 def main():
     """Main validation function"""
+    # Get the project root directory (two levels up from this script)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    
     workflow_files = [
         '.github/workflows/security-comprehensive.yml',
         '.github/workflows/security-basic.yml', 
@@ -173,7 +177,10 @@ def main():
         'github-actions-templates/python-security.yml'
     ]
     
-    print("🔍 Validating GitHub Actions workflow files...")
+    # Convert to absolute paths
+    workflow_files = [os.path.join(project_root, f) for f in workflow_files]
+    
+    print("Validating GitHub Actions workflow files...")
     print("=" * 50)
     
     all_valid = True
@@ -184,10 +191,10 @@ def main():
     
     print("=" * 50)
     if all_valid:
-        print("🎉 All workflow files are valid!")
+        print("All workflow files are valid!")
         return 0
     else:
-        print("❌ Some workflow files have issues")
+        print("Some workflow files have issues")
         return 1
 
 if __name__ == "__main__":
