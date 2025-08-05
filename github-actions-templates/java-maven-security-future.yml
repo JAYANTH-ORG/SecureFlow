@@ -1,0 +1,118 @@
+# Java Maven Security Workflow Template (Future Version)
+# This template shows how to use SecureFlow-Core once it's published to PyPI
+# For now, use java-maven-security.yml which uses individual tools
+#
+# Copy this file to .github/workflows/security.yml in your repository
+
+name: 🛡️ Java Security Scan (SecureFlow)
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+
+env:
+  MAVEN_OPTS: -Dmaven.repo.local=.m2/repository
+  JAVA_VERSION: '17'
+
+jobs:
+  security:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    
+    permissions:
+      security-events: write
+      contents: read
+      pull-requests: write
+      actions: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+        cache: maven
+
+    - name: Set up Python for SecureFlow
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install SecureFlow-Core
+      run: |
+        echo "📦 Installing SecureFlow-Core..."
+        python -m pip install --upgrade pip
+        # TODO: Uncomment when published to PyPI
+        # pip install secureflow-core
+        
+        # For now, install from source or use Git URL
+        pip install git+https://github.com/your-org/secureflow-core.git
+
+    - name: Compile project (for better static analysis)
+      run: |
+        echo "🔨 Compiling Maven project for analysis..."
+        mvn clean compile -DskipTests
+      continue-on-error: true
+
+    - name: Run SecureFlow security scan
+      run: |
+        echo "🛡️ Running SecureFlow comprehensive security scan..."
+        
+        secureflow scan all . \
+          --scan-types sast,secrets,dependencies,containers \
+          --project-type java-maven \
+          --output-format sarif \
+          --output-file security-results.sarif \
+          --severity-threshold medium \
+          --java-version ${{ env.JAVA_VERSION }} \
+          --include-build-files
+
+    - name: Upload SARIF results
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: security-results.sarif
+      if: always()
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: secureflow-security-reports
+        path: |
+          security-results.sarif
+          .secureflow-reports/
+        retention-days: 30
+      if: always()
+
+    - name: Comment on PR with SecureFlow results
+      if: github.event_name == 'pull_request'
+      run: |
+        echo "📝 Generating PR comment..."
+        secureflow report comment \
+          --input security-results.sarif \
+          --github-token ${{ secrets.GITHUB_TOKEN }} \
+          --pr-number ${{ github.event.number }} \
+          --repo ${{ github.repository }}
+
+    - name: Generate security dashboard
+      run: |
+        echo "📊 Generating security dashboard..."
+        secureflow report dashboard \
+          --input security-results.sarif \
+          --output dashboard.html \
+          --project-name "${{ github.repository }}" \
+          --java-version ${{ env.JAVA_VERSION }}
+
+    - name: Fail on high severity issues
+      run: |
+        echo "🚨 Checking for high severity issues..."
+        secureflow gate check \
+          --input security-results.sarif \
+          --fail-on critical,high \
+          --exit-code

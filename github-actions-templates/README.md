@@ -9,20 +9,21 @@ This directory contains GitHub Actions workflows and templates for integrating S
 Choose the appropriate template for your project:
 
 - **Basic Security**: `github-actions-templates/basic-security.yml` - Essential security scanning with auto-detection
-- **Java Maven**: `github-actions-templates/java-maven-security.yml` - Optimized for Maven Java projects
+- **Java Maven**: `github-actions-templates/java-maven-security.yml` - Optimized for Maven Java projects with SecureFlow
 - **Node.js Projects**: `github-actions-templates/nodejs-security.yml` - Optimized for npm/yarn/pnpm Node.js projects
 - **Python Projects**: `github-actions-templates/python-security.yml` - Python-specific security analysis
 - **Container Security**: `github-actions-templates/container-security.yml` - Docker/container security scanning
 
 Copy the template to `.github/workflows/` in your repository.
 
-### 2. Update the Action Reference
+### 2. Update the GitHub Repository Reference
 
-Replace `your-org/secureflow-core` with the actual location of this repository:
+Replace `your-org/secureflow-core` with the actual GitHub repository where SecureFlow-Core is hosted:
 
 ```yaml
-- name: Setup SecureFlow
-  uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
+- name: Install SecureFlow-Core from GitHub
+  run: |
+    pip install git+https://github.com/your-org/secureflow-core.git
 ```
 
 ### 3. Configure Permissions
@@ -79,7 +80,7 @@ permissions:
 | Project Type | Template File | Package Manager | Key Features |
 |-------------|---------------|-----------------|--------------|
 | **Multi-language** | `basic-security.yml` | Auto-detected | 🔍 Auto project detection, basic security scans |
-| **Java Maven** | `java-maven-security.yml` | Maven | ☕ Maven-specific, OWASP dependency check, SpotBugs |
+| **Java Maven** | `java-maven-security.yml` | Maven | ☕ SecureFlow integration, SAST, dependency scanning, SARIF output |
 | **Node.js** | `nodejs-security.yml` | npm/yarn/pnpm | 📦 Package manager detection, license compliance, TypeScript support |
 | **Python** | `python-security.yml` | pip/poetry/pipenv | 🐍 Python-specific tools, virtual environment support |
 | **Container** | `container-security.yml` | Docker | 🐳 Multi-stage scanning, registry integration |
@@ -156,6 +157,32 @@ permissions:
 - **npm**: Uses `npm ci` and `npm audit`
 - **Yarn**: Uses `yarn install --frozen-lockfile` and `yarn audit`
 - **pnpm**: Uses `pnpm install --frozen-lockfile` and `pnpm audit`
+
+### For Java Maven Projects
+
+1. Copy `github-actions-templates/java-maven-security.yml` to `.github/workflows/java-security.yml`
+2. Update the GitHub repository reference:
+
+```yaml
+- name: Install SecureFlow-Core from GitHub
+  run: |
+    pip install git+https://github.com/your-org/secureflow-core.git
+```
+
+3. The workflow will automatically:
+   - Detect Java/Maven project structure
+   - Compile the project for better analysis
+   - Run comprehensive security scans (SAST, secrets, dependencies, containers)
+   - Generate SARIF output for GitHub Security tab
+   - Upload scan artifacts
+
+**Java Version Support**: The workflow supports Java 8-21 and will use the configured Maven local repository.
+
+**Scan Types**:
+- **SAST**: Static analysis with Semgrep for Java-specific vulnerability patterns
+- **Secret Detection**: TruffleHog for hardcoded credentials and API keys
+- **Dependency Scanning**: Maven dependency vulnerability analysis
+- **Container Scanning**: Docker image security if Dockerfile present
 
 ### For Container Projects
 
