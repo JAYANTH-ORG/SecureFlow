@@ -11,6 +11,7 @@ import sys
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import re
 
 def log(message: str, level: str = "INFO"):
     """Log a message with timestamp and level"""
@@ -255,23 +256,47 @@ async def try_secureflow_module(target: str, config: Dict) -> Optional[Dict]:
         return None
 
 def run_individual_tools(target: str, scan_types: List[str], project_type: str) -> List[Dict]:
-    """Run individual security tools as fallback"""
-    log("Running individual security tools as fallback...")
+    """Run individual security tools with enhanced fallback scanning"""
+    log("Running enhanced individual security tools...")
     
     results = []
     
     for scan_type in scan_types:
         if scan_type == "sast":
-            results.append(run_semgrep(target))
+            # Try Semgrep first, fall back to pattern-based scanning
+            semgrep_result = run_semgrep(target)
+            if semgrep_result["success"] and semgrep_result.get("findings", 0) > 0:
+                results.append(semgrep_result)
+            else:
+                log("Semgrep found no issues, running pattern-based SAST fallback...")
+                pattern_result = run_pattern_based_sast(target)
+                results.append(pattern_result)
+                
         elif scan_type == "secrets":
-            results.append(run_trufflehog(target))
+            # Try TruffleHog first, fall back to pattern-based scanning
+            trufflehog_result = run_trufflehog(target)
+            if trufflehog_result["success"] and trufflehog_result.get("findings", 0) > 0:
+                results.append(trufflehog_result)
+            else:
+                log("TruffleHog unavailable/found nothing, running pattern-based secret scanning...")
+                pattern_result = run_pattern_based_secrets(target)
+                results.append(pattern_result)
+                
         elif scan_type == "dependencies":
+            # Enhanced dependency analysis
             if project_type == "java-maven":
-                results.append(run_maven_dependency_check())
+                maven_result = run_maven_dependency_check()
+                results.append(maven_result)
+                
+                # Also run enhanced dependency analysis
+                dep_analysis = run_dependency_analysis(project_type)
+                if dep_analysis.get("findings", 0) > 0:
+                    results.append(dep_analysis)
             else:
                 results.append(run_safety_check())
+                
         elif scan_type == "containers":
-            # Try basic container file detection if no advanced tools available
+            # Try basic container file detection
             container_result = run_basic_container_scan(target)
             if container_result:
                 results.append(container_result)
@@ -335,6 +360,58 @@ def create_sarif_output(tool_results: List[Dict], output_file: str):
                         "physicalLocation": {
                             "artifactLocation": {"uri": finding.get("SourceMetadata", {}).get("Data", {}).get("Filesystem", {}).get("file", "unknown")},
                             "region": {"startLine": finding.get("SourceMetadata", {}).get("Data", {}).get("Filesystem", {}).get("line", 1)}
+                        }
+                    }]
+                }
+                run["results"].append(sarif_result)
+        
+        elif tool_name == "pattern-sast" and "results" in result:
+            # Convert pattern-based SAST findings
+            vulnerabilities = result["results"].get("vulnerabilities", [])
+            for vuln in vulnerabilities:
+                sarif_result = {
+                    "ruleId": f"pattern-{vuln['type']}",
+                    "message": {"text": f"{vuln['type'].replace('_', ' ').title()}: {vuln['code']}"},
+                    "level": "error" if vuln['severity'] == "HIGH" else "warning",
+                    "locations": [{
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": vuln['file']},
+                            "region": {"startLine": vuln['line']}
+                        }
+                    }]
+                }
+                run["results"].append(sarif_result)
+        
+        elif tool_name == "pattern-secrets" and "results" in result:
+            # Convert pattern-based secret findings
+            secrets = result["results"].get("secrets", [])
+            for secret in secrets:
+                sarif_result = {
+                    "ruleId": f"secret-{secret['type']}",
+                    "message": {"text": f"Potential {secret['type'].replace('_', ' ')}: {secret['match']}"},
+                    "level": "error",
+                    "locations": [{
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": secret['file']},
+                            "region": {"startLine": secret['line']}
+                        }
+                    }]
+                }
+                run["results"].append(sarif_result)
+        
+        elif tool_name == "dependency-analysis" and "results" in result:
+            # Convert dependency analysis findings
+            vulnerabilities = result["results"].get("vulnerabilities", [])
+            for vuln in vulnerabilities:
+                cve_list = ", ".join(vuln.get('cve', []))
+                sarif_result = {
+                    "ruleId": f"vulnerable-dependency",
+                    "message": {"text": f"Vulnerable dependency {vuln['dependency']} version {vuln['version']} - {cve_list}"},
+                    "level": "error" if vuln['severity'] in ["HIGH", "CRITICAL"] else "warning",
+                    "locations": [{
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": vuln['file']},
+                            "region": {"startLine": 1}
                         }
                     }]
                 }
@@ -445,7 +522,7 @@ def create_html_report(tool_results: List[Dict], output_file: str, config: Dict)
 </body>
 </html>"""
     
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         f.write(html_content)
     
     log(f"HTML report written to {output_file}")
@@ -477,6 +554,222 @@ def run_basic_container_scan(target: str) -> Optional[Dict]:
         }
     else:
         return None
+
+def run_pattern_based_sast(target: str) -> Dict:
+    """Enhanced pattern-based SAST scanning when Semgrep is unavailable"""
+    log("Running enhanced pattern-based SAST scanning...")
+    
+    sast_patterns = {
+        'sql_injection': [
+            r'Statement.*executeQuery.*\+',
+            r'PreparedStatement.*executeQuery.*\+',
+            r'SELECT.*FROM.*\+.*["\']',
+            r'INSERT.*INTO.*\+.*["\']',
+            r'UPDATE.*SET.*\+.*["\']',
+            r'DELETE.*FROM.*\+.*["\']',
+            r'sql.*=.*["\'].*\+',
+            r'query.*=.*["\'].*\+',
+        ],
+        'xss': [
+            r'response\.getWriter\(\)\.write.*\+',
+            r'response\.getWriter\(\)\.print.*\+',
+            r'<.*>.*\+.*request\.',
+            r'innerHTML.*=.*\+',
+            r'document\.write.*\+',
+            r'\.html\(.*\+',
+        ],
+        'command_injection': [
+            r'Runtime\.getRuntime\(\)\.exec.*\+',
+            r'ProcessBuilder.*\+',
+            r'system\(.*\+',
+            r'exec\(.*\+',
+        ],
+        'path_traversal': [
+            r'new File\(.*\+',
+            r'FileInputStream.*\+',
+            r'FileOutputStream.*\+',
+            r'\.\./',
+            r'\.\.\\\\',
+        ],
+        'weak_crypto': [
+            r'MessageDigest\.getInstance\(["\']MD5["\']',
+            r'MessageDigest\.getInstance\(["\']SHA1["\']',
+            r'Random\(\)',
+            r'Math\.random\(\)',
+        ],
+        'xxe': [
+            r'DocumentBuilderFactory\.newInstance\(\)',
+            r'SAXParserFactory\.newInstance\(\)',
+            r'XMLInputFactory\.newInstance\(\)',
+        ]
+    }
+    
+    findings = []
+    java_files = []
+    
+    for root, dirs, files in os.walk(target):
+        for file in files:
+            if file.endswith(('.java', '.jsp', '.js', '.ts')):
+                java_files.append(os.path.join(root, file))
+    
+    for file_path in java_files:
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+                lines = content.split('\n')
+                
+                for vuln_type, patterns in sast_patterns.items():
+                    for i, line in enumerate(lines, 1):
+                        for pattern in patterns:
+                            if re.search(pattern, line, re.IGNORECASE):
+                                findings.append({
+                                    'type': vuln_type,
+                                    'file': file_path,
+                                    'line': i,
+                                    'code': line.strip(),
+                                    'severity': 'HIGH' if vuln_type in ['sql_injection', 'command_injection'] else 'MEDIUM'
+                                })
+        except Exception as e:
+            log(f"Error scanning {file_path}: {e}", "WARN")
+    
+    log(f"Pattern-based SAST found {len(findings)} potential vulnerabilities")
+    return {
+        "tool": "pattern-sast",
+        "success": True,
+        "findings": len(findings),
+        "results": {"vulnerabilities": findings}
+    }
+
+def run_pattern_based_secrets(target: str) -> Dict:
+    """Enhanced pattern-based secret scanning when TruffleHog is unavailable"""
+    log("Running enhanced pattern-based secret scanning...")
+    
+    secret_patterns = {
+        'api_keys': [
+            r'["\'][A-Za-z0-9]{20,}["\']',
+            r'api[_-]?key["\']?\s*[:=]\s*["\'][^"\']{8,}["\']',
+            r'secret[_-]?key["\']?\s*[:=]\s*["\'][^"\']{8,}["\']',
+            r'access[_-]?token["\']?\s*[:=]\s*["\'][^"\']{8,}["\']',
+        ],
+        'passwords': [
+            r'password["\']?\s*[:=]\s*["\'][^"\']{8,}["\']',
+            r'passwd["\']?\s*[:=]\s*["\'][^"\']{8,}["\']',
+            r'pwd["\']?\s*[:=]\s*["\'][^"\']{8,}["\']',
+        ],
+        'database_urls': [
+            r'jdbc:[^"\']+://[^"\']+:[^"\']+@[^"\']+',
+            r'mongodb://[^"\']+:[^"\']+@[^"\']+',
+            r'redis://[^"\']+:[^"\']+@[^"\']+',
+        ],
+        'private_keys': [
+            r'-----BEGIN [A-Z ]+ PRIVATE KEY-----',
+            r'-----BEGIN RSA PRIVATE KEY-----',
+            r'-----BEGIN PRIVATE KEY-----',
+        ],
+        'jwt_secrets': [
+            r'jwt[_-]?secret["\']?\s*[:=]\s*["\'][^"\']{16,}["\']',
+            r'secret[_-]?key["\']?\s*[:=]\s*["\'][^"\']{32,}["\']',
+        ]
+    }
+    
+    findings = []
+    files_to_scan = []
+    
+    for root, dirs, files in os.walk(target):
+        for file in files:
+            if file.endswith(('.java', '.properties', '.yml', '.yaml', '.env', '.txt', '.json', '.xml')):
+                files_to_scan.append(os.path.join(root, file))
+    
+    for file_path in files_to_scan:
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+                lines = content.split('\n')
+                
+                for secret_type, patterns in secret_patterns.items():
+                    for i, line in enumerate(lines, 1):
+                        for pattern in patterns:
+                            matches = re.findall(pattern, line, re.IGNORECASE)
+                            if matches:
+                                findings.append({
+                                    'type': secret_type,
+                                    'file': file_path,
+                                    'line': i,
+                                    'match': line.strip(),
+                                    'severity': 'HIGH'
+                                })
+        except Exception as e:
+            log(f"Error scanning {file_path}: {e}", "WARN")
+    
+    log(f"Pattern-based secret scanning found {len(findings)} potential secrets")
+    return {
+        "tool": "pattern-secrets",
+        "success": True,
+        "findings": len(findings),
+        "results": {"secrets": findings}
+    }
+
+def run_dependency_analysis(project_type: str) -> Dict:
+    """Enhanced dependency vulnerability analysis"""
+    log("Running enhanced dependency analysis...")
+    
+    vulnerable_dependencies = {
+        'java-maven': {
+            'jackson-databind': {
+                'vulnerable_versions': ['2.9.8', '2.9.9', '2.10.0'],
+                'cve': ['CVE-2019-12086', 'CVE-2019-14540'],
+                'severity': 'HIGH'
+            },
+            'log4j-core': {
+                'vulnerable_versions': ['2.14.1', '2.15.0', '2.16.0'],
+                'cve': ['CVE-2021-44228', 'CVE-2021-45046'],
+                'severity': 'CRITICAL'
+            },
+            'spring-boot': {
+                'vulnerable_versions': ['2.4.0', '2.4.1', '2.4.2'],
+                'cve': ['CVE-2021-22112', 'CVE-2021-22118'],
+                'severity': 'HIGH'
+            },
+            'h2': {
+                'vulnerable_versions': ['1.4.199', '1.4.200'],
+                'cve': ['CVE-2021-23463'],
+                'severity': 'CRITICAL'
+            },
+            'junit': {
+                'vulnerable_versions': ['4.13.1'],
+                'cve': ['CVE-2020-15250'],
+                'severity': 'MEDIUM'
+            }
+        }
+    }
+    
+    findings = []
+    
+    if project_type == 'java-maven' and os.path.exists('pom.xml'):
+        try:
+            with open('pom.xml', 'r', encoding='utf-8') as f:
+                pom_content = f.read()
+                
+                for dep_name, dep_info in vulnerable_dependencies['java-maven'].items():
+                    for version in dep_info['vulnerable_versions']:
+                        if dep_name in pom_content and version in pom_content:
+                            findings.append({
+                                'dependency': dep_name,
+                                'version': version,
+                                'cve': dep_info['cve'],
+                                'severity': dep_info['severity'],
+                                'file': 'pom.xml'
+                            })
+        except Exception as e:
+            log(f"Error analyzing pom.xml: {e}", "WARN")
+    
+    log(f"Dependency analysis found {len(findings)} vulnerable dependencies")
+    return {
+        "tool": "dependency-analysis",
+        "success": True,
+        "findings": len(findings),
+        "results": {"vulnerabilities": findings}
+    }
 
 async def main():
     """Main function for the security scanner"""
