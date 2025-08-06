@@ -157,7 +157,7 @@ def try_secureflow_cli(target: str, config: Dict) -> Optional[Dict]:
     # Build CLI command
     cmd = [
         "secureflow", "scan", "all", target,
-        "--scan-types", config["scan_types"],
+        "--types", config["scan_types"],
         "--project-type", config["project_type"],
         "--output-format", config["output_format"],
         "--output-file", config["output_file"],
@@ -191,15 +191,47 @@ async def try_secureflow_module(target: str, config: Dict) -> Optional[Dict]:
         
         # Configure SecureFlow
         sf_config = Config()
-        sf_config.scanning.project_type = config["project_type"]
-        sf_config.scanning.scan_types = config["scan_types"].split(',')
-        sf_config.scanning.severity_threshold = config["severity_threshold"]
-        sf_config.output.format = config["output_format"]
-        sf_config.output.file = config["output_file"]
+        
+        # Try to set project type - handle different possible field names
+        try:
+            if hasattr(sf_config.scanning, 'project_type'):
+                sf_config.scanning.project_type = config["project_type"]
+            elif hasattr(sf_config.scanning, 'project'):
+                sf_config.scanning.project = config["project_type"]
+        except Exception as e:
+            log(f"Could not set project type: {e}", "WARN")
+        
+        # Try to set scan types
+        try:
+            if hasattr(sf_config.scanning, 'scan_types'):
+                sf_config.scanning.scan_types = config["scan_types"].split(',')
+            elif hasattr(sf_config.scanning, 'types'):
+                sf_config.scanning.types = config["scan_types"].split(',')
+        except Exception as e:
+            log(f"Could not set scan types: {e}", "WARN")
+        
+        # Try to set severity threshold
+        try:
+            if hasattr(sf_config.scanning, 'severity_threshold'):
+                sf_config.scanning.severity_threshold = config["severity_threshold"]
+            elif hasattr(sf_config.scanning, 'severity'):
+                sf_config.scanning.severity = config["severity_threshold"]
+        except Exception as e:
+            log(f"Could not set severity threshold: {e}", "WARN")
+        
+        # Try to set output configuration
+        try:
+            if hasattr(sf_config, 'output'):
+                if hasattr(sf_config.output, 'format'):
+                    sf_config.output.format = config["output_format"]
+                if hasattr(sf_config.output, 'file'):
+                    sf_config.output.file = config["output_file"]
+        except Exception as e:
+            log(f"Could not set output config: {e}", "WARN")
         
         log(f"Scanning target: {target}")
-        log(f"Scan types: {sf_config.scanning.scan_types}")
-        log(f"Project type: {sf_config.scanning.project_type}")
+        log(f"Scan types: {config['scan_types']}")
+        log(f"Project type: {config['project_type']}")
         
         # Initialize and run scan
         sf = SecureFlow(sf_config)
@@ -239,7 +271,12 @@ def run_individual_tools(target: str, scan_types: List[str], project_type: str) 
             else:
                 results.append(run_safety_check())
         elif scan_type == "containers":
-            log("Container scanning requested but no container tools available", "WARN")
+            # Try basic container file detection if no advanced tools available
+            container_result = run_basic_container_scan(target)
+            if container_result:
+                results.append(container_result)
+            else:
+                log("Container scanning requested but no container files found", "WARN")
         else:
             log(f"Unknown scan type: {scan_type}", "WARN")
     
@@ -413,6 +450,34 @@ def create_html_report(tool_results: List[Dict], output_file: str, config: Dict)
     
     log(f"HTML report written to {output_file}")
 
+def run_basic_container_scan(target: str) -> Optional[Dict]:
+    """Basic container file detection and analysis"""
+    log("Running basic container file detection...")
+    
+    container_files = []
+    findings = 0
+    
+    # Look for Dockerfile and docker-compose files
+    for root, dirs, files in os.walk(target):
+        for file in files:
+            if file.lower() in ['dockerfile', 'dockerfile.prod', 'dockerfile.dev'] or file.startswith('Dockerfile'):
+                container_files.append(os.path.join(root, file))
+                findings += 1
+            elif file.lower().startswith('docker-compose'):
+                container_files.append(os.path.join(root, file))
+                findings += 1
+    
+    if container_files:
+        log(f"Found {len(container_files)} container files")
+        return {
+            "tool": "container-detection",
+            "success": True,
+            "findings": findings,
+            "results": {"container_files": container_files}
+        }
+    else:
+        return None
+
 async def main():
     """Main function for the security scanner"""
     # Get configuration from environment variables
@@ -481,13 +546,13 @@ async def main():
     github_output = os.getenv("GITHUB_OUTPUT")
     if github_output:
         with open(github_output, "a") as f:
-            f.write(f"results-file={primary_output}\\n")
-            f.write(f"html-report={html_output if config['generate_html'] else ''}\\n")
-            f.write(f"findings-count={total_findings}\\n")
-            f.write(f"critical-count=0\\n")  # Would need more sophisticated parsing
-            f.write(f"high-count=0\\n")     # Would need more sophisticated parsing
-            f.write(f"scan-status={'success' if successful_tools > 0 else 'failed'}\\n")
-            f.write(f"tools-run={','.join(tools_run)}\\n")
+            f.write(f"results-file={primary_output}\n")
+            f.write(f"html-report={html_output if config['generate_html'] else ''}\n")
+            f.write(f"findings-count={total_findings}\n")
+            f.write(f"critical-count=0\n")  # Would need more sophisticated parsing
+            f.write(f"high-count=0\n")     # Would need more sophisticated parsing
+            f.write(f"scan-status={'success' if successful_tools > 0 else 'failed'}\n")
+            f.write(f"tools-run={','.join(tools_run)}\n")
     
     # Final summary
     log("=" * 50)
