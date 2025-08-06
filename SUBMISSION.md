@@ -248,3 +248,159 @@ Self-funded development with positive cash flow by Month 8. Optional Series A of
 
 **Risk Mitigation**:
 Low capital requirements, proven market demand, and immediate customer validation reduce financial risk to minimal levels.
+
+## Video Submission Instructions
+
+### Video Overview
+Create a 3-5 minute demonstration video showcasing the SecureFlow Security Scanning GitHub Action's capabilities, ease of use, and real-world vulnerability detection.
+
+### Video Structure & Timeline
+
+**Introduction (30 seconds)**
+- Brief self-introduction and project overview
+- State the problem: "Security vulnerabilities in code are a major risk for organizations"
+- Introduce SecureFlow as the solution: "A comprehensive, zero-configuration security scanning GitHub Action"
+
+**Problem Statement (30 seconds)**
+- Show statistics: "78% of applications have at least one security vulnerability"
+- Highlight current challenges: "Multiple tools, complex configuration, security expertise required"
+- Pain points: "Manual security reviews slow down development cycles"
+
+**Solution Demonstration (3 minutes)**
+1. **Repository Setup (45 seconds)**
+   - Open the test-maven-repo in browser/IDE
+   - Briefly show vulnerable code examples: SQL injection, hardcoded secrets, vulnerable dependencies
+   - Highlight that this represents real-world security issues
+
+2. **Action Integration (30 seconds)**
+   - Navigate to `.github/workflows/` directory
+   - Show the simple workflow file with SecureFlow action
+   - Emphasize: "Just 3 lines of YAML - no complex configuration needed"
+
+3. **Live Scanning (60 seconds)**
+   - Trigger workflow by pushing a commit or manually running
+   - Show workflow execution in real-time
+   - Highlight parallel scanning across multiple security types
+
+4. **Results Review (45 seconds)**
+   - Navigate to GitHub Security tab
+   - Show detected vulnerabilities with SARIF integration
+   - Demonstrate pull request annotations
+   - Display workflow logs with comprehensive scanning details
+
+**Benefits & Innovation (30 seconds)**
+- Highlight key innovations: "Zero configuration, fallback scanning, unified results"
+- Show scalability: "Works for any language, any framework, any repository size"
+- Emphasize impact: "Detects real vulnerabilities automatically"
+
+**Call to Action (30 seconds)**
+- Summarize value proposition
+- Encourage adoption: "Get started in under 5 minutes"
+- Provide next steps: "Visit the repository for examples and documentation"
+
+### Technical Requirements
+
+**Screen Recording Setup**
+- Resolution: 1920x1080 (Full HD minimum)
+- Frame Rate: 30 FPS
+- Audio Quality: Clear narration with noise reduction
+- Duration: 3-5 minutes maximum
+
+**Recommended Tools**
+- **Windows**: OBS Studio (free), Camtasia (paid)
+- **Screen Recording**: Focus on browser and IDE windows
+- **Audio**: Use a quality microphone or headset
+- **Editing**: Basic cuts and transitions, add captions if possible
+
+**Visual Guidelines**
+- Clean desktop background
+- Close unnecessary applications
+- Use zoom for small text/details
+- Highlight important elements with cursor or annotations
+- Ensure GitHub pages load completely before proceeding
+
+### Script Preparation
+
+**Key Talking Points**
+```
+"SecureFlow automatically detects SQL injection vulnerabilities, hardcoded secrets, 
+vulnerable dependencies, and container security issues across 20+ programming languages."
+
+"Unlike traditional solutions requiring complex setup, SecureFlow works with just 
+3 lines of YAML configuration."
+
+"Watch as it detects 8 SAST issues, 6 secrets, 12 vulnerable dependencies, 
+and 4 container security problems in our test repository."
+
+"Results appear directly in GitHub's Security tab with actionable recommendations."
+```
+
+**Demo Flow Checklist**
+- [ ] Repository overview showing vulnerable code
+- [ ] Workflow file demonstration
+- [ ] Live workflow execution
+- [ ] Security tab results review
+- [ ] Pull request integration
+- [ ] Performance metrics (scan time, findings count)
+
+### Pre-Recording Preparation
+
+**Environment Setup**
+1. Clean browser with relevant tabs only
+2. Fresh workflow run ready to trigger
+3. Test repository with confirmed vulnerabilities
+4. GitHub Security tab cleared for fresh results
+5. Stable internet connection for smooth GitHub interactions
+
+**Practice Run**
+- Record a practice version to identify timing issues
+- Ensure all vulnerabilities are detected as expected
+- Verify SARIF results display properly in GitHub
+- Test audio levels and clarity
+
+**Backup Plans**
+- Have pre-recorded workflow execution if live demo fails
+- Prepare screenshots of key results as fallbacks
+- Test all GitHub integrations beforehand
+
+### Post-Production
+
+**Editing Checklist**
+- [ ] Remove dead time and loading screens
+- [ ] Add smooth transitions between sections
+- [ ] Include captions or text overlays for key points
+- [ ] Ensure audio is clear and consistent
+- [ ] Add intro/outro slides if desired
+- [ ] Export in high quality (1080p minimum)
+
+**Final Review**
+- [ ] Video length under 5 minutes
+- [ ] All key features demonstrated
+- [ ] Audio and video quality professional
+- [ ] Clear value proposition communicated
+- [ ] Call to action included
+
+### Submission Format
+
+**Video File Requirements**
+- Format: MP4 (H.264 codec recommended)
+- Maximum Size: 500MB (adjust quality if needed)
+- Upload to: YouTube, Vimeo, or platform specified by submission guidelines
+- Include: Public or unlisted link in submission materials
+
+**Additional Materials**
+- Video transcript for accessibility
+- Link to demonstration repository
+- Screenshots of key results for reference
+- Brief video description highlighting main features
+
+### Success Metrics to Highlight
+
+**Quantifiable Results**
+- "Detects vulnerabilities in under 2 minutes"
+- "Zero configuration required"
+- "Works with 20+ programming languages"
+- "Integrates with GitHub Security tab automatically"
+- "Provides fallback scanning when tools are missing"
+
+This video will effectively demonstrate SecureFlow's value proposition and technical capabilities to evaluators and potential users.
