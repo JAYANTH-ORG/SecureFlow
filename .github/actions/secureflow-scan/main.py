@@ -155,11 +155,10 @@ def try_secureflow_cli(target: str, config: Dict) -> Optional[Dict]:
             log("SecureFlow CLI not available", "WARN")
             return None
     
-    # Build CLI command
+    # Build CLI command with only supported parameters
     cmd = [
         "secureflow", "scan", "all", target,
         "--types", config["scan_types"],
-        "--project-type", config["project_type"],
         "--output-format", config["output_format"],
         "--output-file", config["output_file"],
         "--severity-threshold", config["severity_threshold"]
@@ -168,8 +167,7 @@ def try_secureflow_cli(target: str, config: Dict) -> Optional[Dict]:
     if config.get("config_file") and os.path.exists(config["config_file"]):
         cmd.extend(["--config", config["config_file"]])
     
-    if config.get("java_version"):
-        cmd.extend(["--java-version", config["java_version"]])
+    # Note: --java-version and --project-type may not be supported by all CLI versions
     
     log(f"Running: {' '.join(cmd)}")
     returncode, stdout, stderr = run_command(cmd)
