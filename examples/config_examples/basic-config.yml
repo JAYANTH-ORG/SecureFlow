@@ -18,7 +18,7 @@ scanning:
   # Tool selection
   sast_tool: "semgrep"
   sca_tool: "safety"
-  secrets_tool: "truffhog"
+  secrets_tool: "trufflehog"
   iac_tool: "checkov"
   container_tool: "trivy"
   

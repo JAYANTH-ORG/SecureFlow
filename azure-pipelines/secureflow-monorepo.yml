@@ -1,0 +1,664 @@
+# SecureFlow Monorepo Security Pipeline
+# Comprehensive security pipeline for multi-project monorepos
+# Features: Multi-language support, differential scanning, project dependency analysis
+
+parameters:
+- name: repository_path
+  type: string
+  default: '$(Build.SourcesDirectory)'
+- name: projects_config
+  type: object
+  default: []
+  # Example:
+  # - name: 'frontend'
+  #   path: 'apps/frontend'
+  #   type: 'nodejs'
+  #   scan_types: ['sast', 'sca', 'secrets']
+  # - name: 'backend'
+  #   path: 'apps/backend'
+  #   type: 'java-maven'
+  #   scan_types: ['sast', 'sca', 'secrets', 'dast']
+- name: enable_differential_scan
+  type: boolean
+  default: true
+- name: enable_dependency_analysis
+  type: boolean
+  default: true
+- name: parallel_execution
+  type: boolean
+  default: true
+- name: fail_on_any_critical
+  type: boolean
+  default: true
+- name: generate_unified_report
+  type: boolean
+  default: true
+
+variables:
+  MONOREPO_CACHE: $(Pipeline.Workspace)/.monorepo-cache
+  CHANGED_PROJECTS: ''
+
+stages:
+- stage: MonorepoAnalysis
+  displayName: 'Monorepo Structure Analysis'
+  jobs:
+  - job: AnalyzeMonorepo
+    displayName: 'Analyze Monorepo Structure'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    # Setup Python for SecureFlow
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install secureflow-core[all] gitpython
+      displayName: 'Install SecureFlow and Dependencies'
+
+    # Auto-discover projects if not configured
+    - script: |
+        echo "🔍 Analyzing monorepo structure..."
+        
+        # Create monorepo analysis script
+        cat > analyze_monorepo.py << 'EOF'
+        import os
+        import json
+        import git
+        from pathlib import Path
+        
+        def detect_project_type(path):
+            """Detect project type based on files"""
+            if (path / "pom.xml").exists():
+                return "java-maven"
+            elif (path / "build.gradle").exists() or (path / "build.gradle.kts").exists():
+                return "java-gradle"
+            elif (path / "package.json").exists():
+                return "nodejs"
+            elif (path / "requirements.txt").exists() or (path / "pyproject.toml").exists():
+                return "python"
+            elif (path / "Dockerfile").exists():
+                return "container"
+            elif (path / "go.mod").exists():
+                return "go"
+            elif (path / "Cargo.toml").exists():
+                return "rust"
+            elif any((path / f).exists() for f in ["*.csproj", "*.sln"]):
+                return "dotnet"
+            else:
+                return "generic"
+        
+        def find_projects(root_path):
+            """Find all projects in monorepo"""
+            projects = []
+            root = Path(root_path)
+            
+            # Common monorepo patterns
+            patterns = [
+                "apps/*",
+                "packages/*",
+                "services/*",
+                "libs/*",
+                "modules/*",
+                "projects/*"
+            ]
+            
+            # Check root level
+            project_type = detect_project_type(root)
+            if project_type != "generic":
+                projects.append({
+                    "name": "root",
+                    "path": ".",
+                    "type": project_type,
+                    "scan_types": ["sast", "sca", "secrets"]
+                })
+            
+            # Check pattern-based directories
+            for pattern in patterns:
+                for path in root.glob(pattern):
+                    if path.is_dir():
+                        project_type = detect_project_type(path)
+                        if project_type != "generic":
+                            projects.append({
+                                "name": path.name,
+                                "path": str(path.relative_to(root)),
+                                "type": project_type,
+                                "scan_types": ["sast", "sca", "secrets"]
+                            })
+            
+            return projects
+        
+        def get_changed_projects(repo_path, target_branch="origin/main"):
+            """Get list of changed projects based on Git diff"""
+            try:
+                repo = git.Repo(repo_path)
+                
+                # Get changed files
+                if len(list(repo.iter_commits())) > 1:
+                    changed_files = [
+                        item.a_path for item in 
+                        repo.head.commit.diff(f"{target_branch}...HEAD")
+                    ]
+                else:
+                    # First commit - scan all
+                    changed_files = []
+                    for root, dirs, files in os.walk(repo_path):
+                        for file in files:
+                            changed_files.append(os.path.relpath(os.path.join(root, file), repo_path))
+                
+                return changed_files
+            except Exception as e:
+                print(f"Git analysis failed: {e}")
+                return []
+        
+        # Analyze repository
+        repo_path = os.getcwd()
+        print(f"Analyzing repository at: {repo_path}")
+        
+        # Auto-discover projects
+        discovered_projects = find_projects(repo_path)
+        print(f"Discovered {len(discovered_projects)} projects:")
+        for project in discovered_projects:
+            print(f"  - {project['name']} ({project['type']}) at {project['path']}")
+        
+        # Get changed files for differential scanning
+        changed_files = get_changed_projects(repo_path)
+        print(f"Found {len(changed_files)} changed files")
+        
+        # Determine which projects are affected
+        affected_projects = []
+        for project in discovered_projects:
+            project_path = project['path']
+            if project_path == '.':
+                # Root project - check if any files changed
+                if changed_files:
+                    affected_projects.append(project['name'])
+            else:
+                # Check if any changed files are in this project
+                if any(f.startswith(project_path + '/') for f in changed_files):
+                    affected_projects.append(project['name'])
+        
+        # Output results
+        result = {
+            "discovered_projects": discovered_projects,
+            "changed_files": changed_files,
+            "affected_projects": affected_projects
+        }
+        
+        with open("monorepo-analysis.json", "w") as f:
+            json.dump(result, f, indent=2)
+        
+        print(f"Affected projects: {affected_projects}")
+        EOF
+        
+        python analyze_monorepo.py
+        
+        # Set pipeline variables
+        if [ -f "monorepo-analysis.json" ]; then
+          AFFECTED_PROJECTS=$(cat monorepo-analysis.json | jq -r '.affected_projects[]' | tr '\n' ',' | sed 's/,$//')
+          echo "##vso[task.setvariable variable=AFFECTED_PROJECTS;isOutput=true]$AFFECTED_PROJECTS"
+          echo "Affected projects: $AFFECTED_PROJECTS"
+        fi
+      displayName: 'Analyze Monorepo Structure'
+      name: analysis
+
+    # Create project-specific scanning strategies
+    - script: |
+        echo "📋 Creating scanning strategies..."
+        
+        # Process configured projects or use discovered ones
+        if [ '${{ length(parameters.projects_config) }}' -gt 0 ]; then
+          echo "Using configured projects"
+          echo '${{ convertToJson(parameters.projects_config) }}' > projects-config.json
+        else
+          echo "Using auto-discovered projects"
+          if [ -f "monorepo-analysis.json" ]; then
+            cat monorepo-analysis.json | jq '.discovered_projects' > projects-config.json
+          else
+            echo "[]" > projects-config.json
+          fi
+        fi
+        
+        echo "Projects configuration:"
+        cat projects-config.json | jq '.'
+      displayName: 'Create Scanning Strategies'
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '.'
+        artifactName: 'monorepo-analysis'
+        publishLocation: 'Container'
+      displayName: 'Publish Analysis Results'
+
+- stage: ProjectSecurityScanning
+  displayName: 'Project Security Scanning'
+  dependsOn: MonorepoAnalysis
+  variables:
+    AFFECTED_PROJECTS: $[ stageDependencies.MonorepoAnalysis.AnalyzeMonorepo.outputs['analysis.AFFECTED_PROJECTS'] ]
+  jobs:
+  - job: ScanProjects
+    displayName: 'Scan Individual Projects'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      ${{ if eq(parameters.parallel_execution, true) }}:
+        parallel: 5
+      ${{ else }}:
+        parallel: 1
+    
+    steps:
+    # Setup environment
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - task: NodeTool@0
+      inputs:
+        versionSpec: '18'
+      displayName: 'Setup Node.js'
+
+    - task: JavaToolInstaller@0
+      inputs:
+        versionSpec: '17'
+        jdkArchitectureOption: 'x64'
+        jdkSourceOption: 'PreInstalled'
+      displayName: 'Setup Java'
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install secureflow-core[all]
+      displayName: 'Install SecureFlow'
+
+    # Download analysis results
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'monorepo-analysis'
+        downloadPath: '$(System.ArtifactsDirectory)'
+      displayName: 'Download Analysis Results'
+
+    # Scan each project
+    - script: |
+        echo "🔍 Scanning monorepo projects..."
+        
+        cd "$(System.ArtifactsDirectory)/monorepo-analysis"
+        
+        if [ ! -f "projects-config.json" ]; then
+          echo "No projects configuration found"
+          exit 0
+        fi
+        
+        # Create scan script
+        cat > scan_projects.py << 'EOF'
+        import json
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+        
+        def run_command(cmd, cwd=None):
+            """Run shell command"""
+            try:
+                result = subprocess.run(
+                    cmd, shell=True, cwd=cwd, 
+                    capture_output=True, text=True, check=False
+                )
+                return result.returncode == 0, result.stdout, result.stderr
+            except Exception as e:
+                return False, "", str(e)
+        
+        def scan_project(project, repo_root, differential_mode=False, affected_projects=[]):
+            """Scan individual project"""
+            project_name = project['name']
+            project_path = project['path']
+            project_type = project['type']
+            scan_types = project.get('scan_types', ['sast', 'sca', 'secrets'])
+            
+            print(f"\n🔍 Scanning project: {project_name} ({project_type})")
+            print(f"   Path: {project_path}")
+            print(f"   Scan types: {scan_types}")
+            
+            # Skip if differential mode and project not affected
+            if differential_mode and project_name not in affected_projects:
+                print(f"   ⏭️ Skipping {project_name} (not affected)")
+                return True
+            
+            project_full_path = os.path.join(repo_root, project_path)
+            if not os.path.exists(project_full_path):
+                print(f"   ❌ Project path does not exist: {project_full_path}")
+                return False
+            
+            # Create output directory
+            output_dir = f"scan-results/{project_name}"
+            os.makedirs(output_dir, exist_ok=True)
+            
+            success = True
+            
+            # Project-specific setup
+            if project_type == "nodejs":
+                # Install dependencies for better analysis
+                if os.path.exists(os.path.join(project_full_path, "package.json")):
+                    print(f"   📦 Installing Node.js dependencies...")
+                    success, stdout, stderr = run_command("npm ci --silent", cwd=project_full_path)
+                    if not success:
+                        print(f"   ⚠️ npm install failed: {stderr}")
+            
+            elif project_type in ["java-maven"]:
+                # Compile for better analysis
+                print(f"   🏗️ Compiling Java project...")
+                success, stdout, stderr = run_command("mvn clean compile -q", cwd=project_full_path)
+                if not success:
+                    print(f"   ⚠️ Maven compile failed: {stderr}")
+            
+            elif project_type == "python":
+                # Install dependencies
+                if os.path.exists(os.path.join(project_full_path, "requirements.txt")):
+                    print(f"   📦 Installing Python dependencies...")
+                    success, stdout, stderr = run_command("pip install -r requirements.txt", cwd=project_full_path)
+            
+            # Run security scans
+            for scan_type in scan_types:
+                print(f"   🔍 Running {scan_type} scan...")
+                
+                cmd = f"secureflow scan {scan_type} --target {project_full_path} --format json --output {output_dir}/{scan_type}-results.json"
+                
+                # Add project-specific options
+                if project_type == "nodejs":
+                    cmd += " --package-manager auto-detect"
+                elif project_type in ["java-maven", "java-gradle"]:
+                    cmd += f" --language java --build-tool {project_type.split('-')[1]}"
+                elif project_type == "python":
+                    cmd += " --language python"
+                
+                success, stdout, stderr = run_command(cmd)
+                if not success:
+                    print(f"   ⚠️ {scan_type} scan failed: {stderr}")
+                else:
+                    print(f"   ✅ {scan_type} scan completed")
+            
+            # Generate project-specific report
+            print(f"   📊 Generating project report...")
+            cmd = f"secureflow report generate --input-dir {output_dir} --output-file {output_dir}/security-report.html --title '{project_name} Security Report'"
+            success, stdout, stderr = run_command(cmd)
+            
+            return True
+        
+        # Load configuration
+        with open("projects-config.json", "r") as f:
+            projects = json.load(f)
+        
+        # Get affected projects for differential scanning
+        affected_projects = os.environ.get('AFFECTED_PROJECTS', '').split(',') if os.environ.get('AFFECTED_PROJECTS') else []
+        differential_mode = os.environ.get('ENABLE_DIFFERENTIAL_SCAN', 'true').lower() == 'true'
+        
+        print(f"Differential mode: {differential_mode}")
+        print(f"Affected projects: {affected_projects}")
+        
+        # Scan all projects
+        repo_root = os.environ.get('BUILD_SOURCESDIRECTORY', os.getcwd())
+        all_success = True
+        
+        for project in projects:
+            project_success = scan_project(project, repo_root, differential_mode, affected_projects)
+            all_success = all_success and project_success
+        
+        if not all_success:
+            print("\n❌ Some project scans failed")
+            sys.exit(1)
+        else:
+            print("\n✅ All project scans completed successfully")
+        EOF
+        
+        export ENABLE_DIFFERENTIAL_SCAN="${{ parameters.enable_differential_scan }}"
+        export BUILD_SOURCESDIRECTORY="${{ parameters.repository_path }}"
+        
+        python scan_projects.py
+      displayName: 'Scan Individual Projects'
+      env:
+        AFFECTED_PROJECTS: $(AFFECTED_PROJECTS)
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '$(System.ArtifactsDirectory)/monorepo-analysis/scan-results'
+        artifactName: 'project-scan-results'
+        publishLocation: 'Container'
+      displayName: 'Publish Project Scan Results'
+      condition: succeededOrFailed()
+
+- stage: DependencyAnalysis
+  displayName: 'Cross-Project Dependency Analysis'
+  dependsOn: ProjectSecurityScanning
+  condition: and(succeeded(), eq('${{ parameters.enable_dependency_analysis }}', true))
+  jobs:
+  - job: AnalyzeDependencies
+    displayName: 'Analyze Project Dependencies'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        pip install secureflow-core[all] networkx matplotlib
+      displayName: 'Install Dependencies'
+
+    # Download analysis and scan results
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'monorepo-analysis'
+        downloadPath: '$(System.ArtifactsDirectory)'
+      displayName: 'Download Analysis Results'
+
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'project-scan-results'
+        downloadPath: '$(System.ArtifactsDirectory)'
+      displayName: 'Download Scan Results'
+
+    # Analyze cross-project dependencies
+    - script: |
+        echo "🔍 Analyzing cross-project dependencies..."
+        
+        cd "$(System.ArtifactsDirectory)"
+        
+        cat > dependency_analysis.py << 'EOF'
+        import json
+        import os
+        import networkx as nx
+        import matplotlib.pyplot as plt
+        from pathlib import Path
+        
+        def analyze_dependencies():
+            """Analyze dependencies between projects"""
+            
+            # Load project configuration
+            config_path = "monorepo-analysis/projects-config.json"
+            if not os.path.exists(config_path):
+                print("No projects configuration found")
+                return
+            
+            with open(config_path, "r") as f:
+                projects = json.load(f)
+            
+            # Create dependency graph
+            G = nx.DiGraph()
+            
+            # Add project nodes
+            for project in projects:
+                G.add_node(project['name'], type=project['type'])
+            
+            # Analyze dependencies (simplified - would need project-specific logic)
+            dependencies = {}
+            
+            for project in projects:
+                project_name = project['name']
+                project_path = project['path']
+                project_type = project['type']
+                
+                print(f"Analyzing dependencies for {project_name}")
+                
+                # Check if scan results exist
+                scan_results_path = f"project-scan-results/{project_name}"
+                if os.path.exists(scan_results_path):
+                    # Look for SCA results that might contain dependency info
+                    sca_file = f"{scan_results_path}/sca-results.json"
+                    if os.path.exists(sca_file):
+                        try:
+                            with open(sca_file, "r") as f:
+                                sca_data = json.load(f)
+                                # Extract dependency information
+                                # This would be tool-specific implementation
+                                dependencies[project_name] = sca_data.get('dependencies', [])
+                        except:
+                            dependencies[project_name] = []
+                
+                # Add cross-project dependencies to graph
+                # This is a simplified example - real implementation would parse
+                # package.json, pom.xml, etc. for internal dependencies
+                for other_project in projects:
+                    if other_project['name'] != project_name:
+                        # Check if there's a dependency relationship
+                        # This would need project-specific logic
+                        pass
+            
+            # Generate dependency report
+            dependency_report = {
+                "projects": len(projects),
+                "dependencies": dependencies,
+                "graph_metrics": {
+                    "nodes": G.number_of_nodes(),
+                    "edges": G.number_of_edges(),
+                    "is_acyclic": nx.is_directed_acyclic_graph(G)
+                }
+            }
+            
+            with open("dependency-analysis.json", "w") as f:
+                json.dump(dependency_report, f, indent=2)
+            
+            # Generate dependency visualization
+            if G.number_of_nodes() > 0:
+                plt.figure(figsize=(12, 8))
+                pos = nx.spring_layout(G)
+                nx.draw(G, pos, with_labels=True, node_color='lightblue', 
+                       node_size=1000, font_size=8, arrows=True)
+                plt.title("Project Dependency Graph")
+                plt.savefig("dependency-graph.png", dpi=300, bbox_inches='tight')
+                plt.close()
+            
+            print("✅ Dependency analysis completed")
+        
+        analyze_dependencies()
+        EOF
+        
+        python dependency_analysis.py
+      displayName: 'Analyze Dependencies'
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '$(System.ArtifactsDirectory)'
+        artifactName: 'dependency-analysis-results'
+        publishLocation: 'Container'
+      displayName: 'Publish Dependency Analysis'
+
+- stage: UnifiedReporting
+  displayName: 'Unified Security Reporting'
+  dependsOn: 
+  - ProjectSecurityScanning
+  - DependencyAnalysis
+  condition: and(succeeded(), eq('${{ parameters.generate_unified_report }}', true))
+  jobs:
+  - job: GenerateUnifiedReport
+    displayName: 'Generate Unified Security Report'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        pip install secureflow-core[all]
+      displayName: 'Install SecureFlow'
+
+    # Download all results
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'multiple'
+        downloadPath: '$(System.ArtifactsDirectory)'
+      displayName: 'Download All Results'
+
+    # Generate unified security report
+    - script: |
+        echo "📊 Generating unified monorepo security report..."
+        
+        cd "$(System.ArtifactsDirectory)"
+        
+        # Generate comprehensive monorepo report
+        secureflow report generate \
+          --input-dir . \
+          --output-file monorepo-security-report.html \
+          --format html \
+          --title "Monorepo Security Analysis Report" \
+          --monorepo-mode \
+          --include-dependencies \
+          --include-cross-project-analysis
+        
+        # Generate executive summary
+        secureflow report executive-summary \
+          --input-dir . \
+          --output-file executive-summary.html \
+          --title "Monorepo Security Executive Summary"
+        
+        echo "✅ Unified reports generated"
+      displayName: 'Generate Unified Reports'
+
+    # Security gate for entire monorepo
+    - script: |
+        echo "🚦 Running Monorepo Security Gate..."
+        
+        cd "$(System.ArtifactsDirectory)"
+        
+        if [ "${{ parameters.fail_on_any_critical }}" = "True" ]; then
+          secureflow gate check \
+            --input-dir . \
+            --fail-on-severity critical \
+            --max-critical-issues 0 \
+            --monorepo-mode
+        else
+          echo "Security gate disabled - continuing pipeline"
+        fi
+      displayName: 'Monorepo Security Gate'
+
+    - task: PublishHtmlReport@1
+      inputs:
+        reportDir: '$(System.ArtifactsDirectory)'
+        tabName: 'Monorepo Security Report'
+      displayName: 'Publish Unified Security Report'
+      condition: succeededOrFailed()
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '$(System.ArtifactsDirectory)'
+        artifactName: 'monorepo-unified-security-report'
+        publishLocation: 'Container'
+      displayName: 'Publish Unified Report Artifacts'
+      condition: succeededOrFailed()

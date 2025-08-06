@@ -1,0 +1,660 @@
+# SecureFlow Enterprise Azure Integration Pipeline
+# Enterprise-grade security pipeline with deep Azure integration
+# Features: Azure Security Center, Key Vault, Policy compliance, ARM template scanning
+
+parameters:
+- name: repository_path
+  type: string
+  default: '$(Build.SourcesDirectory)'
+- name: azure_subscription_id
+  type: string
+  default: ''
+- name: key_vault_name
+  type: string
+  default: ''
+- name: security_center_workspace
+  type: string
+  default: ''
+- name: policy_set_definition
+  type: string
+  default: 'enterprise-security-baseline'
+- name: enable_defender_integration
+  type: boolean
+  default: true
+- name: enable_sentinel_integration
+  type: boolean
+  default: false
+- name: compliance_frameworks
+  type: object
+  default: ['SOC2', 'PCI-DSS', 'ISO27001', 'NIST']
+- name: notification_teams_webhook
+  type: string
+  default: ''
+- name: enable_arm_template_scan
+  type: boolean
+  default: true
+- name: enable_terraform_scan
+  type: boolean
+  default: true
+
+variables:
+- group: enterprise-security-secrets
+- name: AZURE_SUBSCRIPTION
+  value: '${{ parameters.azure_subscription_id }}'
+- name: KEY_VAULT_NAME
+  value: '${{ parameters.key_vault_name }}'
+
+stages:
+- stage: EnterpriseSecuritySetup
+  displayName: 'Enterprise Security Setup'
+  jobs:
+  - job: AzureSecuritySetup
+    displayName: 'Azure Security Integration Setup'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    # Azure CLI and authentication
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'Enterprise-Security-Connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "🔐 Setting up Azure security integration..."
+          
+          # Verify Azure subscription access
+          az account show --output table
+          
+          # Set subscription context
+          if [ -n "${{ parameters.azure_subscription_id }}" ]; then
+            az account set --subscription "${{ parameters.azure_subscription_id }}"
+          fi
+          
+          echo "✅ Azure authentication configured"
+      displayName: 'Azure Authentication Setup'
+
+    # Setup Python and SecureFlow
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install secureflow-core[all] azure-cli azure-identity azure-keyvault-secrets azure-mgmt-security
+      displayName: 'Install SecureFlow and Azure Tools'
+
+    # Key Vault integration setup
+    - ${{ if ne(parameters.key_vault_name, '') }}:
+      - task: AzureKeyVault@2
+        inputs:
+          azureSubscription: 'Enterprise-Security-Connection'
+          KeyVaultName: '${{ parameters.key_vault_name }}'
+          SecretsFilter: 'secureflow-*'
+          RunAsPreJob: false
+        displayName: 'Retrieve Security Secrets from Key Vault'
+
+    # Configure SecureFlow enterprise settings
+    - script: |
+        echo "⚙️ Configuring SecureFlow enterprise settings..."
+        
+        # Create enterprise configuration
+        cat > .secureflow-enterprise.yaml << EOF
+        enterprise:
+          azure:
+            subscription_id: "${{ parameters.azure_subscription_id }}"
+            key_vault: "${{ parameters.key_vault_name }}"
+            security_center: "${{ parameters.security_center_workspace }}"
+            defender_integration: ${{ parameters.enable_defender_integration }}
+            sentinel_integration: ${{ parameters.enable_sentinel_integration }}
+          
+          compliance:
+            frameworks: ${{ convertToJson(parameters.compliance_frameworks) }}
+            policy_set: "${{ parameters.policy_set_definition }}"
+          
+          notifications:
+            teams_webhook: "${{ parameters.notification_teams_webhook }}"
+          
+          scanning:
+            arm_templates: ${{ parameters.enable_arm_template_scan }}
+            terraform: ${{ parameters.enable_terraform_scan }}
+        EOF
+        
+        echo "✅ Enterprise configuration created"
+      displayName: 'Configure Enterprise Settings'
+
+- stage: InfrastructureSecurityScan
+  displayName: 'Infrastructure Security Scanning'
+  dependsOn: EnterpriseSecuritySetup
+  jobs:
+  - job: InfrastructureScan
+    displayName: 'Infrastructure as Code Security'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        pip install secureflow-core[all] checkov tfsec terrascan
+      displayName: 'Install Infrastructure Security Tools'
+
+    # ARM Template security scanning
+    - ${{ if eq(parameters.enable_arm_template_scan, true) }}:
+      - script: |
+          echo "🔍 Scanning ARM templates..."
+          
+          # Find ARM templates
+          find . -name "*.json" -path "*/arm/*" -o -name "*template*.json" -o -name "azuredeploy.json" > arm-templates.txt
+          
+          if [ -s arm-templates.txt ]; then
+            echo "Found ARM templates:"
+            cat arm-templates.txt
+            
+            # Scan ARM templates with Checkov
+            checkov -f $(cat arm-templates.txt | tr '\n' ' ') --framework arm --output json --output-file checkov-arm-report.json || true
+            
+            # SecureFlow ARM template scanning
+            while IFS= read -r template; do
+              if [ -n "$template" ]; then
+                secureflow scan arm-template \
+                  --target "$template" \
+                  --format json \
+                  --output "arm-scan-$(basename "$template" .json).json"
+              fi
+            done < arm-templates.txt
+            
+            echo "✅ ARM template scanning completed"
+          else
+            echo "ℹ️ No ARM templates found"
+          fi
+        displayName: 'ARM Template Security Scan'
+
+    # Terraform security scanning
+    - ${{ if eq(parameters.enable_terraform_scan, true) }}:
+      - script: |
+          echo "🔍 Scanning Terraform configurations..."
+          
+          # Find Terraform files
+          find . -name "*.tf" -o -name "*.tfvars" > terraform-files.txt
+          
+          if [ -s terraform-files.txt ]; then
+            echo "Found Terraform files:"
+            cat terraform-files.txt
+            
+            # tfsec scanning
+            tfsec . --format json --out tfsec-report.json || true
+            
+            # Checkov Terraform scanning
+            checkov -d . --framework terraform --output json --output-file checkov-terraform-report.json || true
+            
+            # Terrascan scanning
+            terrascan scan -d . -o json > terrascan-report.json || true
+            
+            # SecureFlow Terraform scanning
+            secureflow scan terraform \
+              --target . \
+              --format json \
+              --output terraform-security-scan.json
+            
+            echo "✅ Terraform scanning completed"
+          else
+            echo "ℹ️ No Terraform files found"
+          fi
+        displayName: 'Terraform Security Scan'
+
+    # Azure Policy compliance check
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'Enterprise-Security-Connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "🔍 Checking Azure Policy compliance..."
+          
+          # Get policy assignments
+          az policy assignment list --query "[?policyDefinitionId contains('${{ parameters.policy_set_definition }}')]" --output json > policy-assignments.json
+          
+          # Check compliance state
+          az policy state list --resource-group-name "$(Build.Repository.Name)-rg" --output json > policy-compliance.json || true
+          
+          echo "✅ Policy compliance check completed"
+      displayName: 'Azure Policy Compliance Check'
+      condition: ne('${{ parameters.azure_subscription_id }}', '')
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '.'
+        artifactName: 'infrastructure-security-results'
+        publishLocation: 'Container'
+      displayName: 'Publish Infrastructure Security Results'
+
+- stage: ApplicationSecurityScan
+  displayName: 'Application Security Scanning'
+  dependsOn: EnterpriseSecuritySetup
+  jobs:
+  - job: EnterpriseAppScan
+    displayName: 'Enterprise Application Security'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        pip install secureflow-core[all]
+      displayName: 'Install SecureFlow'
+
+    # Comprehensive SAST with enterprise rules
+    - script: |
+        echo "🔍 Running enterprise SAST analysis..."
+        
+        # SecureFlow SAST with enterprise ruleset
+        secureflow scan sast \
+          --target . \
+          --format json \
+          --output enterprise-sast-results.json \
+          --ruleset enterprise \
+          --compliance-frameworks SOC2,PCI-DSS,ISO27001
+        
+        # CodeQL analysis for enterprise patterns
+        if command -v codeql >/dev/null 2>&1; then
+          echo "Running CodeQL enterprise analysis..."
+          codeql database create codeql-db --language=javascript,python,java
+          codeql database analyze codeql-db --format=json --output=codeql-enterprise-results.json
+        fi
+      displayName: 'Enterprise SAST Analysis'
+
+    # Dependency vulnerability scanning with enterprise controls
+    - script: |
+        echo "🔍 Running enterprise dependency scanning..."
+        
+        # SecureFlow SCA with enterprise policies
+        secureflow scan sca \
+          --target . \
+          --format json \
+          --output enterprise-sca-results.json \
+          --policy enterprise \
+          --check-licenses \
+          --check-vulnerabilities \
+          --check-compliance
+        
+        # License compliance validation
+        secureflow compliance check \
+          --framework Enterprise-License-Policy \
+          --input-dir . \
+          --output license-compliance.json
+      displayName: 'Enterprise Dependency Scanning'
+
+    # Secrets scanning with enterprise patterns
+    - script: |
+        echo "🔐 Running enterprise secrets scanning..."
+        
+        # SecureFlow secrets with enterprise patterns
+        secureflow scan secrets \
+          --target . \
+          --format json \
+          --output enterprise-secrets-results.json \
+          --patterns enterprise \
+          --check-azure-keys \
+          --check-certificates
+      displayName: 'Enterprise Secrets Scanning'
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '.'
+        artifactName: 'application-security-results'
+        publishLocation: 'Container'
+      displayName: 'Publish Application Security Results'
+
+- stage: DefenderIntegration
+  displayName: 'Microsoft Defender Integration'
+  dependsOn: ApplicationSecurityScan
+  condition: and(succeeded(), eq('${{ parameters.enable_defender_integration }}', true))
+  jobs:
+  - job: DefenderIntegration
+    displayName: 'Microsoft Defender for DevOps'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        pip install secureflow-core[all]
+      displayName: 'Install SecureFlow'
+
+    # Download security results
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'multiple'
+        downloadPath: '$(System.ArtifactsDirectory)'
+      displayName: 'Download Security Results'
+
+    # Microsoft Defender for DevOps integration
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'Enterprise-Security-Connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "🛡️ Integrating with Microsoft Defender for DevOps..."
+          
+          cd "$(System.ArtifactsDirectory)"
+          
+          # Upload security findings to Defender
+          secureflow integration defender \
+            --subscription-id "${{ parameters.azure_subscription_id }}" \
+            --workspace "${{ parameters.security_center_workspace }}" \
+            --input-dir . \
+            --repository "$(Build.Repository.Name)" \
+            --commit "$(Build.SourceVersion)"
+          
+          echo "✅ Defender integration completed"
+      displayName: 'Microsoft Defender Integration'
+
+- stage: SentinelIntegration
+  displayName: 'Azure Sentinel Integration'
+  dependsOn: ApplicationSecurityScan
+  condition: and(succeeded(), eq('${{ parameters.enable_sentinel_integration }}', true))
+  jobs:
+  - job: SentinelIntegration
+    displayName: 'Azure Sentinel SIEM Integration'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        pip install secureflow-core[all] azure-mgmt-securityinsight
+      displayName: 'Install SecureFlow and Sentinel Tools'
+
+    # Download security results
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'multiple'
+        downloadPath: '$(System.ArtifactsDirectory)'
+      displayName: 'Download Security Results'
+
+    # Azure Sentinel integration
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'Enterprise-Security-Connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "🔍 Integrating with Azure Sentinel..."
+          
+          cd "$(System.ArtifactsDirectory)"
+          
+          # Send security events to Sentinel
+          secureflow integration sentinel \
+            --subscription-id "${{ parameters.azure_subscription_id }}" \
+            --workspace "${{ parameters.security_center_workspace }}" \
+            --input-dir . \
+            --event-type "DevSecOps-Scan" \
+            --repository "$(Build.Repository.Name)" \
+            --pipeline "$(Build.DefinitionName)" \
+            --build-id "$(Build.BuildId)"
+          
+          echo "✅ Sentinel integration completed"
+      displayName: 'Azure Sentinel Integration'
+
+- stage: ComplianceValidation
+  displayName: 'Enterprise Compliance Validation'
+  dependsOn: 
+  - InfrastructureSecurityScan
+  - ApplicationSecurityScan
+  condition: succeeded()
+  jobs:
+  - job: EnterpriseCompliance
+    displayName: 'Enterprise Compliance Checks'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        pip install secureflow-core[all]
+      displayName: 'Install SecureFlow'
+
+    # Download all security results
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'multiple'
+        downloadPath: '$(System.ArtifactsDirectory)'
+      displayName: 'Download All Security Results'
+
+    # Enterprise compliance validation
+    - script: |
+        echo "✅ Running enterprise compliance validation..."
+        
+        cd "$(System.ArtifactsDirectory)"
+        
+        # SOC 2 compliance
+        secureflow compliance check \
+          --framework SOC2 \
+          --input-dir . \
+          --output soc2-compliance.json \
+          --enterprise-mode
+        
+        # PCI DSS compliance
+        secureflow compliance check \
+          --framework PCI-DSS \
+          --input-dir . \
+          --output pci-dss-compliance.json \
+          --enterprise-mode
+        
+        # ISO 27001 compliance
+        secureflow compliance check \
+          --framework ISO27001 \
+          --input-dir . \
+          --output iso27001-compliance.json \
+          --enterprise-mode
+        
+        # NIST Cybersecurity Framework
+        secureflow compliance check \
+          --framework NIST-CSF \
+          --input-dir . \
+          --output nist-csf-compliance.json \
+          --enterprise-mode
+        
+        # Generate enterprise compliance dashboard
+        secureflow compliance dashboard \
+          --input-dir . \
+          --output enterprise-compliance-dashboard.html \
+          --frameworks SOC2,PCI-DSS,ISO27001,NIST-CSF \
+          --title "Enterprise Security Compliance Dashboard"
+        
+        echo "✅ Enterprise compliance validation completed"
+      displayName: 'Enterprise Compliance Validation'
+
+    # Teams notification (if configured)
+    - ${{ if ne(parameters.notification_teams_webhook, '') }}:
+      - script: |
+          echo "📢 Sending compliance notification to Teams..."
+          
+          # Send Teams notification
+          curl -H "Content-Type: application/json" \
+            -d '{
+              "@type": "MessageCard",
+              "@context": "https://schema.org/extensions",
+              "summary": "Enterprise Security Compliance Report",
+              "themeColor": "0076D7",
+              "sections": [{
+                "activityTitle": "Enterprise Security Compliance Report",
+                "activitySubtitle": "Repository: $(Build.Repository.Name)",
+                "facts": [{
+                  "name": "Build ID:",
+                  "value": "$(Build.BuildId)"
+                }, {
+                  "name": "Status:",
+                  "value": "Completed"
+                }],
+                "potentialAction": [{
+                  "@type": "OpenUri",
+                  "name": "View Build",
+                  "targets": [{
+                    "os": "default",
+                    "uri": "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+                  }]
+                }]
+              }]
+            }' \
+            "${{ parameters.notification_teams_webhook }}"
+        displayName: 'Send Teams Notification'
+        condition: always()
+
+    - task: PublishHtmlReport@1
+      inputs:
+        reportDir: '$(System.ArtifactsDirectory)'
+        tabName: 'Enterprise Compliance Dashboard'
+      displayName: 'Publish Compliance Dashboard'
+      condition: succeededOrFailed()
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '$(System.ArtifactsDirectory)'
+        artifactName: 'enterprise-compliance-results'
+        publishLocation: 'Container'
+      displayName: 'Publish Compliance Results'
+      condition: succeededOrFailed()
+
+- stage: SecurityReporting
+  displayName: 'Enterprise Security Reporting'
+  dependsOn: ComplianceValidation
+  condition: succeeded()
+  jobs:
+  - job: EnterpriseReporting
+    displayName: 'Generate Enterprise Reports'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.11'
+        addToPath: true
+      displayName: 'Setup Python'
+
+    - script: |
+        pip install secureflow-core[all]
+      displayName: 'Install SecureFlow'
+
+    # Download all results
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'multiple'
+        downloadPath: '$(System.ArtifactsDirectory)'
+      displayName: 'Download All Results'
+
+    # Generate comprehensive enterprise security report
+    - script: |
+        echo "📊 Generating enterprise security reports..."
+        
+        cd "$(System.ArtifactsDirectory)"
+        
+        # Executive summary report
+        secureflow report executive-summary \
+          --input-dir . \
+          --output enterprise-executive-summary.html \
+          --title "Enterprise Security Executive Summary" \
+          --include-compliance \
+          --include-risk-assessment
+        
+        # Technical security report
+        secureflow report technical \
+          --input-dir . \
+          --output enterprise-technical-report.html \
+          --title "Enterprise Technical Security Report" \
+          --include-infrastructure \
+          --include-application \
+          --include-compliance
+        
+        # Compliance audit report
+        secureflow report compliance-audit \
+          --input-dir . \
+          --output enterprise-compliance-audit.html \
+          --frameworks SOC2,PCI-DSS,ISO27001,NIST-CSF \
+          --title "Enterprise Compliance Audit Report"
+        
+        # Risk assessment report
+        secureflow report risk-assessment \
+          --input-dir . \
+          --output enterprise-risk-assessment.html \
+          --title "Enterprise Security Risk Assessment"
+        
+        echo "✅ Enterprise reports generated"
+      displayName: 'Generate Enterprise Reports'
+
+    # Store reports in Azure Storage (if configured)
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'Enterprise-Security-Connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "💾 Storing reports in Azure Storage..."
+          
+          # This would upload reports to a configured Azure Storage account
+          # for long-term retention and compliance auditing
+          
+          STORAGE_ACCOUNT="enterprisesecurityreports"
+          CONTAINER_NAME="security-reports"
+          
+          if az storage account show --name $STORAGE_ACCOUNT >/dev/null 2>&1; then
+            az storage blob upload-batch \
+              --destination $CONTAINER_NAME \
+              --source "$(System.ArtifactsDirectory)" \
+              --account-name $STORAGE_ACCOUNT \
+              --pattern "*.html"
+            
+            echo "✅ Reports stored in Azure Storage"
+          else
+            echo "ℹ️ Azure Storage not configured"
+          fi
+      displayName: 'Store Reports in Azure Storage'
+      condition: ne('${{ parameters.azure_subscription_id }}', '')
+
+    - task: PublishHtmlReport@1
+      inputs:
+        reportDir: '$(System.ArtifactsDirectory)'
+        tabName: 'Enterprise Security Reports'
+      displayName: 'Publish Enterprise Reports'
+      condition: succeededOrFailed()
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '$(System.ArtifactsDirectory)'
+        artifactName: 'enterprise-security-reports'
+        publishLocation: 'Container'
+      displayName: 'Publish Final Reports'
+      condition: succeededOrFailed()

@@ -139,7 +139,7 @@ class Scanner:
                 "npm-audit": self._run_npm_audit,
             },
             "secrets": {
-                "truffhog": self._run_truffhog,
+                "trufflehog": self._run_truffhog,
                 "gitleaks": self._run_gitleaks,
                 "detect-secrets": self._run_detect_secrets,
             },

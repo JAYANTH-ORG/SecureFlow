@@ -25,6 +25,49 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Detect project type
+      id: detect
+      run: |
+        echo "🔍 Detecting project type..."
+        
+        if [ -f "pom.xml" ]; then
+          echo "PROJECT_TYPE=maven" >> $GITHUB_OUTPUT
+          echo "✅ Maven project detected"
+        elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+          echo "PROJECT_TYPE=gradle" >> $GITHUB_OUTPUT
+          echo "✅ Gradle project detected"
+        elif [ -f "package.json" ]; then
+          echo "PROJECT_TYPE=nodejs" >> $GITHUB_OUTPUT
+          echo "✅ Node.js project detected"
+          
+          # Detect package manager
+          if [ -f "pnpm-lock.yaml" ]; then
+            echo "PACKAGE_MANAGER=pnpm" >> $GITHUB_OUTPUT
+            echo "📦 pnpm package manager detected"
+          elif [ -f "yarn.lock" ]; then
+            echo "PACKAGE_MANAGER=yarn" >> $GITHUB_OUTPUT
+            echo "📦 Yarn package manager detected"
+          elif [ -f "package-lock.json" ]; then
+            echo "PACKAGE_MANAGER=npm" >> $GITHUB_OUTPUT
+            echo "📦 npm package manager detected"
+          else
+            echo "PACKAGE_MANAGER=npm" >> $GITHUB_OUTPUT
+            echo "📦 Defaulting to npm package manager"
+          fi
+        elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
+          echo "PROJECT_TYPE=python" >> $GITHUB_OUTPUT
+          echo "✅ Python project detected"
+        elif [ -f "Cargo.toml" ]; then
+          echo "PROJECT_TYPE=rust" >> $GITHUB_OUTPUT
+          echo "✅ Rust project detected"
+        elif [ -f "go.mod" ]; then
+          echo "PROJECT_TYPE=go" >> $GITHUB_OUTPUT
+          echo "✅ Go project detected"
+        else
+          echo "PROJECT_TYPE=generic" >> $GITHUB_OUTPUT
+          echo "ℹ️ Generic project detected"
+        fi
+
     - name: Setup SecureFlow
       uses: your-org/secureflow-core/.github/actions/setup-secureflow@main
       with:
@@ -32,12 +75,47 @@ jobs:
 
     - name: Run security scans
       run: |
+        echo "🛡️ Running security scans for ${{ steps.detect.outputs.PROJECT_TYPE }} project..."
+        
+        # Configure scan based on project type
+        case "${{ steps.detect.outputs.PROJECT_TYPE }}" in
+          maven)
+            echo "📦 Configuring Maven-specific scans..."
+            SCAN_ARGS="--scan-types sast,secrets,dependencies --maven-project"
+            ;;
+          gradle)
+            echo "📦 Configuring Gradle-specific scans..."
+            SCAN_ARGS="--scan-types sast,secrets,dependencies --gradle-project"
+            ;;
+          nodejs)
+            echo "📦 Configuring Node.js-specific scans..."
+            PM="${{ steps.detect.outputs.PACKAGE_MANAGER || 'npm' }}"
+            SCAN_ARGS="--scan-types sast,secrets,dependencies --nodejs-project --package-manager $PM"
+            
+            # Add TypeScript support if detected
+            if [ -f "tsconfig.json" ] || grep -q "typescript" package.json 2>/dev/null; then
+              SCAN_ARGS="$SCAN_ARGS --typescript"
+              echo "✅ TypeScript support enabled"
+            fi
+            ;;
+          python)
+            echo "📦 Configuring Python-specific scans..."
+            SCAN_ARGS="--scan-types sast,secrets,dependencies --python-project"
+            ;;
+          *)
+            echo "📦 Using generic scan configuration..."
+            SCAN_ARGS="--scan-types sast,secrets"
+            ;;
+        esac
+        
         secureflow scan all . \
+          $SCAN_ARGS \
           --output-format sarif \
-          --output-file security-results.sarif
+          --output-file security-results.sarif \
+          --severity-threshold medium
 
     - name: Upload SARIF results
-      uses: github/codeql-action/upload-sarif@v2
+      uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: security-results.sarif
       if: always()
@@ -47,15 +125,39 @@ jobs:
       uses: actions/github-script@v6
       with:
         script: |
-          const comment = `## 🛡️ Security Scan Results
+          const projectType = "${{ steps.detect.outputs.PROJECT_TYPE }}";
+          const packageManager = "${{ steps.detect.outputs.PACKAGE_MANAGER }}";
           
-          Security scan completed! Check the Security tab for detailed results.
+          let comment = `## 🛡️ Security Scan Results\n\n`;
+          comment += `**Project Type:** ${projectType.charAt(0).toUpperCase() + projectType.slice(1)}`;
           
-          *Powered by SecureFlow-Core*`;
+          if (projectType === 'nodejs' && packageManager) {
+            comment += ` (${packageManager})`;
+          }
+          comment += `\n\n`;
+          
+          comment += `Security scan completed! Check the Security tab for detailed results.\n\n`;
+          
+          comment += `### Scans Performed:\n`;
+          comment += `- 🔍 **Static Analysis (SAST)** - Code vulnerability detection\n`;
+          comment += `- 🔐 **Secret Scanning** - Credential and token detection\n`;
+          
+          if (projectType !== 'generic') {
+            comment += `- 📦 **Dependency Analysis** - Third-party vulnerability scanning\n`;
+          }
+          
+          if (projectType === 'nodejs') {
+            comment += `- 🔍 **Package Audit** - ${packageManager} security audit\n`;
+            comment += `- 📋 **License Check** - Open source license compliance\n`;
+          }
+          
+          comment += `\n*Powered by SecureFlow-Core*`;
+          
+          const finalComment = comment;
           
           github.rest.issues.createComment({
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
-            body: comment
+            body: finalComment
           });

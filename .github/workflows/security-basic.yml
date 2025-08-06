@@ -58,7 +58,7 @@ jobs:
         fetch-depth: 0
 
     - name: 🐍 Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         cache: 'pip'
@@ -139,10 +139,15 @@ jobs:
       continue-on-error: true
 
     - name: 🐳 Run Container Security Scan
-      if: ${{ (github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'container') && hashFiles('Dockerfile', 'docker-compose.yml') != '' }}
+      if: github.event.inputs.scan_type == 'all' || github.event.inputs.scan_type == 'container'
       run: |
         echo "🐳 Running Container Security Scan..."
-        if [ -f "Dockerfile" ]; then
+        HAS_CONTAINER_FILES="false"
+        if [ -f "Dockerfile" ] || [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ]; then
+          HAS_CONTAINER_FILES="true"
+        fi
+        
+        if [ "$HAS_CONTAINER_FILES" = "true" ]; then
           # Build image for scanning
           docker build -t ${{ github.repository }}:${{ github.sha }} .
           
@@ -216,7 +221,7 @@ jobs:
 
     - name: 📋 Upload SARIF Results
       if: always()
-      uses: github/codeql-action/upload-sarif@v2
+      uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: security-reports/
         category: secureflow-security-scan
@@ -224,7 +229,7 @@ jobs:
 
     - name: 📄 Upload Security Reports
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: security-reports-${{ github.sha }}
         path: |

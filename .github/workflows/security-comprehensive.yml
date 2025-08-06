@@ -1,7 +1,7 @@
 # SecureFlow Comprehensive Security Workflow for GitHub Actions
 # This workflow provides enterprise-grade security scanning with compliance reporting
 
-name: 🛡️ Security Scan (Comprehensive)
+name: 🛡 Security Scan (Comprehensive)
 
 on:
   schedule:
@@ -71,22 +71,63 @@ jobs:
           SCAN_TYPES+=("kubernetes")
         fi
         
-        # Create matrix
-        MATRIX=$(printf '%s\n' "${SCAN_TYPES[@]}" | jq -R . | jq -s .)
-        echo "matrix={\"scan_type\":$MATRIX}" >> $GITHUB_OUTPUT
+        # Create matrix - robust JSON formatting without jq dependency
+        if [ ${#SCAN_TYPES[@]} -eq 0 ]; then
+          echo "matrix={\"scan_type\":[\"general\"]}" >> $GITHUB_OUTPUT
+        else
+          # Build JSON array manually to avoid jq dependency issues
+          JSON_ARRAY="["
+          for i in "${!SCAN_TYPES[@]}"; do
+            if [ $i -gt 0 ]; then
+              JSON_ARRAY+=","
+            fi
+            JSON_ARRAY+="\"${SCAN_TYPES[$i]}\""
+          done
+          JSON_ARRAY+="]"
+          echo "matrix={\"scan_type\":$JSON_ARRAY}" >> $GITHUB_OUTPUT
+        fi
         
-        # Create scan configuration
+        # Create scan configuration - robust JSON formatting
+        SCAN_TYPES_JSON="["
+        for i in "${!SCAN_TYPES[@]}"; do
+          if [ $i -gt 0 ]; then
+            SCAN_TYPES_JSON+=","
+          fi
+          SCAN_TYPES_JSON+="\"${SCAN_TYPES[$i]}\""
+        done
+        SCAN_TYPES_JSON+="]"
+        # Create scan configuration with proper JSON escaping
+        PROJECT_NAME="${{ github.repository }}"
+        CONTAINER_IMAGE="${{ github.event.inputs.container_image }}"
+        NOTIFICATION_LEVEL="${{ github.event.inputs.notification_level || 'high' }}"
+        
+        # Properly escape JSON strings
+        PROJECT_NAME_ESCAPED=$(printf '%s' "$PROJECT_NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        CONTAINER_IMAGE_ESCAPED=$(printf '%s' "$CONTAINER_IMAGE" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        NOTIFICATION_LEVEL_ESCAPED=$(printf '%s' "$NOTIFICATION_LEVEL" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        
+        # Create properly formatted JSON
         cat > scan_config.json << EOF
-        {
-          "project_name": "${{ github.repository }}",
-          "scan_types": $(echo "${SCAN_TYPES[@]}" | jq -R 'split(" ")'),
-          "compliance_frameworks": $(echo "${{ github.event.inputs.compliance_frameworks || 'SOC2,PCI-DSS' }}" | tr ',' '\n' | jq -R . | jq -s .),
-          "container_image": "${{ github.event.inputs.container_image }}",
-          "notification_level": "${{ github.event.inputs.notification_level || 'high' }}"
-        }
-        EOF
+{
+  "project_name": "$PROJECT_NAME_ESCAPED",
+  "scan_types": $SCAN_TYPES_JSON,
+  "compliance_frameworks": ["SOC2", "PCI-DSS"],
+  "container_image": "$CONTAINER_IMAGE_ESCAPED",
+  "notification_level": "$NOTIFICATION_LEVEL_ESCAPED"
+}
+EOF
         
-        echo "scan_config=$(cat scan_config.json | jq -c .)" >> $GITHUB_OUTPUT
+        # Validate JSON format
+        if ! python3 -m json.tool scan_config.json > /dev/null 2>&1; then
+          echo "❌ Generated JSON is invalid. Content:"
+          cat scan_config.json
+          exit 1
+        fi
+        
+        echo "✅ Generated valid JSON configuration:"
+        cat scan_config.json
+        
+        echo "scan_config=$(cat scan_config.json)" >> $GITHUB_OUTPUT
 
   static-analysis:
     name: 🔍 Static Analysis (${{ matrix.scan_type }})
@@ -109,13 +150,13 @@ jobs:
         fetch-depth: 0
 
     - name: 🐍 Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: 🟢 Set up Node.js
       if: matrix.scan_type == 'javascript'
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
@@ -243,7 +284,7 @@ jobs:
 
     - name: 📄 Upload Scan Results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: security-results-${{ matrix.scan_type }}-${{ github.sha }}
         path: |
@@ -315,7 +356,7 @@ jobs:
 
     - name: 📄 Upload Infrastructure Results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: infrastructure-security-${{ github.sha }}
         path: |
@@ -323,11 +364,34 @@ jobs:
           tfsec-*.json
         retention-days: 30
 
+  check-container-files:
+    name: � Check Container Files
+    runs-on: ubuntu-latest
+    needs: pre-security-setup
+    outputs:
+      has-docker-files: ${{ steps.check.outputs.has-docker-files }}
+    steps:
+    - name: 🔄 Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Check for container files
+      id: check
+      run: |
+        HAS_DOCKER_FILES="false"
+        if [ -f "Dockerfile" ] || [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ] || find . -name "Dockerfile" -o -name "docker-compose.*" | grep -q .; then
+          HAS_DOCKER_FILES="true"
+        fi
+        if [ "${{ github.event.inputs.container_image }}" != "" ]; then
+          HAS_DOCKER_FILES="true"
+        fi
+        echo "has-docker-files=$HAS_DOCKER_FILES" >> $GITHUB_OUTPUT
+        echo "🐳 Container files detected: $HAS_DOCKER_FILES"
+
   container-security:
     name: 🐳 Container Security
     runs-on: ubuntu-latest
-    needs: pre-security-setup
-    if: github.event.inputs.container_image != '' || hashFiles('Dockerfile', 'docker-compose.yml') != ''
+    needs: [pre-security-setup, check-container-files]
+    if: needs.check-container-files.outputs.has-docker-files == 'true'
     
     permissions:
       security-events: write
@@ -350,18 +414,28 @@ jobs:
         sudo apt-get install trivy
 
     - name: 🔍 Dockerfile Security Scan
-      if: hashFiles('Dockerfile') != ''
       run: |
         echo "🔍 Scanning Dockerfile for security issues..."
-        trivy config --format json --output dockerfile-scan.json . || true
+        if [ -f "Dockerfile" ]; then
+          trivy config --format json --output dockerfile-scan.json . || true
+        else
+          echo "No Dockerfile found in root directory"
+        fi
 
     - name: 🏗️ Build Container Image
-      if: hashFiles('Dockerfile') != ''
       run: |
-        IMAGE_NAME="${{ github.repository }}:${{ github.sha }}"
-        echo "🏗️ Building container image: $IMAGE_NAME"
-        docker build -t "$IMAGE_NAME" .
-        echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+        if [ -f "Dockerfile" ]; then
+          IMAGE_NAME="${{ github.repository }}:${{ github.sha }}"
+          echo "🏗️ Building container image: $IMAGE_NAME"
+          docker build -t "$IMAGE_NAME" .
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+        elif [ "${{ github.event.inputs.container_image }}" != "" ]; then
+          IMAGE_NAME="${{ github.event.inputs.container_image }}"
+          echo "Using provided container image: $IMAGE_NAME"
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+        else
+          echo "No Dockerfile or container image specified"
+        fi
 
     - name: 🐳 Container Image Security Scan
       run: |
@@ -387,7 +461,7 @@ jobs:
 
     - name: 📄 Upload Container Results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: container-security-${{ github.sha }}
         path: |
@@ -412,7 +486,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: 🐍 Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
@@ -422,7 +496,7 @@ jobs:
         pip install secureflow-core[all]
 
     - name: 📥 Download All Scan Results
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         path: scan-results/
 
@@ -532,7 +606,7 @@ jobs:
             </style>
         </head>
         <body>
-            <h1>🛡️ Security Executive Summary</h1>
+            <h1>🛡 Security Executive Summary</h1>
             <p><strong>Repository:</strong> ${{ github.repository }}</p>
             <p><strong>Scan Date:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
             
@@ -576,7 +650,7 @@ jobs:
 
     - name: 📋 Upload SARIF Results
       if: always()
-      uses: github/codeql-action/upload-sarif@v2
+      uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: comprehensive-report/
         category: secureflow-comprehensive-scan
@@ -584,7 +658,7 @@ jobs:
 
     - name: 📄 Upload Comprehensive Report
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: comprehensive-security-report-${{ github.sha }}
         path: comprehensive-report/
@@ -623,10 +697,11 @@ jobs:
     
     steps:
     - name: 📥 Download Executive Summary
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: comprehensive-security-report-${{ github.sha }}
         path: report/
+      continue-on-error: true
 
     - name: 📧 Create Security Issue
       if: always()
@@ -649,7 +724,7 @@ jobs:
           
           if (criticalCount > 0 || (highCount > 0 && '${{ github.event.inputs.notification_level }}' !== 'critical')) {
             const title = `🚨 Security Alert: ${criticalCount} Critical, ${highCount} High Issues Found`;
-            const body = `## 🛡️ Security Scan Alert
+            const body = `## 🛡 Security Scan Alert
             
             **Repository:** ${{ github.repository }}
             **Scan Date:** ${new Date().toISOString()}

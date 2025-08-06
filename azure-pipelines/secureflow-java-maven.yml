@@ -1,0 +1,302 @@
+# SecureFlow Java Maven Security Pipeline
+# Optimized Azure DevOps pipeline for Java Maven projects
+# Features: Maven integration, OWASP dependency check, SpotBugs, enhanced SAST
+
+parameters:
+- name: repository_path
+  type: string
+  default: '$(Build.SourcesDirectory)'
+- name: java_version
+  type: string
+  default: '17'
+- name: maven_goals
+  type: string
+  default: 'clean compile'
+- name: enable_owasp_check
+  type: boolean
+  default: true
+- name: enable_spotbugs
+  type: boolean
+  default: true
+- name: fail_on_critical
+  type: boolean
+  default: true
+- name: compliance_frameworks
+  type: object
+  default: ['SOC2', 'PCI-DSS']
+
+variables:
+  MAVEN_CACHE_FOLDER: $(Pipeline.Workspace)/.m2/repository
+  MAVEN_OPTS: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
+
+stages:
+- stage: JavaSecurityScan
+  displayName: 'Java Maven Security Analysis'
+  jobs:
+  - job: MavenSecurityScan
+    displayName: 'Maven Security Scan'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    # Cache Maven dependencies
+    - task: Cache@2
+      inputs:
+        key: 'maven | "$(Agent.OS)" | **/pom.xml'
+        restoreKeys: |
+          maven | "$(Agent.OS)"
+          maven
+        path: $(MAVEN_CACHE_FOLDER)
+      displayName: 'Cache Maven Dependencies'
+
+    # Setup Java environment
+    - task: JavaToolInstaller@0
+      inputs:
+        versionSpec: '${{ parameters.java_version }}'
+        jdkArchitectureOption: 'x64'
+        jdkSourceOption: 'PreInstalled'
+      displayName: 'Setup Java ${{ parameters.java_version }}'
+
+    # Setup Python for SecureFlow
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.13'
+        addToPath: true
+      displayName: 'Setup Python (SecureFlow)'
+
+    # Validate Maven project
+    - script: |
+        echo "🔍 Validating Maven project structure..."
+        
+        if [ ! -f "pom.xml" ]; then
+          echo "❌ No pom.xml found - not a Maven project"
+          exit 1
+        fi
+        
+        echo "✅ Maven project detected"
+        
+        # Extract project information
+        PROJECT_NAME=$(mvn help:evaluate -Dexpression=project.name -q -DforceStdout)
+        PROJECT_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+        
+        echo "📦 Project: $PROJECT_NAME"
+        echo "🏷️ Version: $PROJECT_VERSION"
+        
+        echo "##vso[task.setvariable variable=PROJECT_NAME]$PROJECT_NAME"
+        echo "##vso[task.setvariable variable=PROJECT_VERSION]$PROJECT_VERSION"
+      displayName: 'Validate Maven Project'
+
+    # Maven build and dependency resolution
+    - task: Maven@3
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: '${{ parameters.maven_goals }}'
+        options: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
+      displayName: 'Maven Build for Analysis'
+
+    # Install SecureFlow-Core
+    - script: |
+        echo "🛡️ Installing SecureFlow-Core..."
+        python -m pip install --upgrade pip
+        pip install secureflow-core
+        
+        echo "✅ SecureFlow-Core installed"
+        secureflow --version
+      displayName: 'Install SecureFlow-Core'
+
+    # Run comprehensive Java security scanning
+    - script: |
+        echo "🔍 Running comprehensive Java/Maven security analysis..."
+        
+        secureflow scan all ${{ parameters.repository_path }} \
+          --maven-project \
+          --java-version ${{ parameters.java_version }} \
+          --include-build-files \
+          --output-format json \
+          --output-file $(Agent.TempDirectory)/java-security-results.json \
+          --severity-threshold medium
+        
+        echo "✅ Java security scan completed"
+      displayName: 'Run Java Security Scan'
+      continueOnError: true
+
+    # OWASP Dependency Check
+    - ${{ if eq(parameters.enable_owasp_check, true) }}:
+      - script: |
+          echo "🔍 Running OWASP Dependency Check..."
+          
+          # Check if OWASP plugin is configured
+          if grep -q "dependency-check-maven" pom.xml; then
+            echo "✅ OWASP plugin found in pom.xml"
+            mvn org.owasp:dependency-check-maven:check \
+              -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) \
+              -DfailBuildOnCVSS=7 \
+              -DsuppressionsFile=.owasp-suppressions.xml
+          else
+            echo "ℹ️ OWASP plugin not configured, running standalone check"
+            mvn org.owasp:dependency-check-maven:6.5.1:check \
+              -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER) \
+              -DfailBuildOnCVSS=7
+          fi
+        displayName: 'OWASP Dependency Check'
+        continueOnError: true
+
+    # SpotBugs Analysis
+    - ${{ if eq(parameters.enable_spotbugs, true) }}:
+      - script: |
+          echo "🐛 Running SpotBugs analysis..."
+          
+          if grep -q "spotbugs-maven-plugin" pom.xml; then
+            echo "✅ SpotBugs plugin found in pom.xml"
+            mvn spotbugs:check -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)
+          else
+            echo "ℹ️ SpotBugs plugin not configured, running standalone analysis"
+            mvn com.github.spotbugs:spotbugs-maven-plugin:4.7.3.0:check \
+              -Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)
+          fi
+        displayName: 'SpotBugs Security Analysis'
+        continueOnError: true
+
+    # Maven Security Analysis
+    - script: |
+        echo "🔐 Running Maven-specific security checks..."
+        
+        # Check for vulnerable Maven plugins
+        mvn versions:display-plugin-updates | tee $(Agent.TempDirectory)/plugin-updates.txt
+        
+        # Analyze dependency tree for security issues
+        mvn dependency:tree -DoutputFile=$(Agent.TempDirectory)/dependency-tree.txt
+        
+        # Check for dependency conflicts
+        mvn dependency:analyze-duplicate | tee $(Agent.TempDirectory)/duplicate-deps.txt
+        
+        echo "✅ Maven security analysis completed"
+      displayName: 'Maven Security Analysis'
+      continueOnError: true
+
+    # Compliance checking
+    - script: |
+        echo "📋 Running compliance checks for Java project..."
+        
+        FRAMEWORKS="${{ join(',', parameters.compliance_frameworks) }}"
+        
+        secureflow compliance check \
+          --frameworks $FRAMEWORKS \
+          --input ${{ parameters.repository_path }} \
+          --project-type java-maven \
+          --output-format json \
+          --output-file $(Agent.TempDirectory)/compliance-results.json
+        
+        echo "✅ Compliance checks completed"
+      displayName: 'Compliance Checks'
+      continueOnError: true
+
+    # Generate comprehensive security report
+    - script: |
+        echo "📊 Generating comprehensive security report..."
+        
+        secureflow report generate \
+          --input $(Agent.TempDirectory)/*-results.json \
+          --format html,xml,sarif \
+          --output $(Agent.TempDirectory)/java-security-report \
+          --project-name "$(PROJECT_NAME)" \
+          --project-version "$(PROJECT_VERSION)" \
+          --project-type "Java Maven" \
+          --include-remediation
+        
+        echo "✅ Security report generated"
+      displayName: 'Generate Security Report'
+      continueOnError: true
+
+    # Publish test results
+    - task: PublishTestResults@2
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: |
+          $(Agent.TempDirectory)/**/TEST-*.xml
+          target/surefire-reports/TEST-*.xml
+          target/failsafe-reports/TEST-*.xml
+        mergeTestResults: true
+        failTaskOnFailedTests: false
+        testRunTitle: 'Java Security Test Results'
+      displayName: 'Publish Test Results'
+      condition: succeededOrFailed()
+
+    # Publish security artifacts
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: '$(Agent.TempDirectory)'
+        artifactName: 'java-security-reports'
+        publishLocation: 'Container'
+      displayName: 'Publish Security Reports'
+      condition: succeededOrFailed()
+
+    # Publish OWASP reports if available
+    - task: PublishHtmlReport@1
+      inputs:
+        reportDir: 'target'
+        tabName: 'OWASP Dependency Check'
+      displayName: 'Publish OWASP Report'
+      condition: and(succeededOrFailed(), eq('${{ parameters.enable_owasp_check }}', true))
+
+    # Create work items for critical issues
+    - script: |
+        echo "🚨 Creating work items for critical security issues..."
+        
+        secureflow azure create-work-items \
+          --input $(Agent.TempDirectory)/*-results.json \
+          --severity critical,high \
+          --project $(System.TeamProject) \
+          --area-path "Security/Java" \
+          --iteration $(System.TeamProject) \
+          --assigned-to $(Build.RequestedForEmail) \
+          --tags "security,java,maven,automated"
+        
+        echo "✅ Work items created for critical issues"
+      displayName: 'Create Security Work Items'
+      condition: succeededOrFailed()
+      env:
+        AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)
+
+    # Security gate - fail build on critical issues
+    - script: |
+        echo "🚪 Evaluating security gate..."
+        
+        # Parse results and determine if build should fail
+        python -c "
+import json
+import sys
+import glob
+
+critical_count = 0
+high_count = 0
+
+for file_path in glob.glob('$(Agent.TempDirectory)/*-results.json'):
+    try:
+        with open(file_path, 'r') as f:
+            results = json.load(f)
+            
+        # Count critical and high severity issues
+        for vuln in results.get('vulnerabilities', []):
+            severity = vuln.get('severity', '').lower()
+            if severity == 'critical':
+                critical_count += 1
+            elif severity == 'high':
+                high_count += 1
+    except Exception as e:
+        print(f'Warning: Could not parse {file_path}: {e}')
+
+print(f'Critical issues: {critical_count}')
+print(f'High severity issues: {high_count}')
+
+if critical_count > 0:
+    print('❌ Build failed due to critical security issues')
+    sys.exit(1)
+elif high_count > 10:  # Allow up to 10 high severity issues
+    print('❌ Build failed due to too many high severity issues')
+    sys.exit(1)
+else:
+    print('✅ Security gate passed')
+"
+      displayName: 'Security Gate Evaluation'
+      condition: eq('${{ parameters.fail_on_critical }}', true)
