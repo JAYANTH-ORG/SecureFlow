@@ -159,8 +159,8 @@ def try_secureflow_cli(target: str, config: Dict) -> Optional[Dict]:
     cmd = [
         "secureflow", "scan", "all", target,
         "--types", config["scan_types"],
-        "--output-format", config["output_format"],
-        "--output-file", config["output_file"],
+        "--format", config["output_format"],  # Changed from --output-format to --format
+        "--output", config["output_file"],   # Changed from --output-file to --output
         "--severity-threshold", config["severity_threshold"]
     ]
     
@@ -241,7 +241,7 @@ async def try_secureflow_module(target: str, config: Dict) -> Optional[Dict]:
             "tool": "secureflow-module",
             "success": True,
             "results": results,
-            "count": len(results)
+            "findings": len(results)  # Changed from "count" to "findings"
         }
         
     except ImportError as e:
@@ -814,6 +814,15 @@ async def main():
             tools_run.append("secureflow-module")
             tool_results.append(module_result)
             log("SecureFlow module succeeded")
+            
+            # If SecureFlow module found few results, also run enhanced individual tools
+            module_findings = module_result.get("findings", 0)
+            if module_findings < 10:  # If less than 10 findings, run enhanced scanning
+                log(f"SecureFlow module found only {module_findings} findings, running enhanced individual tools...")
+                scan_types = config["scan_types"].split(",")
+                individual_results = run_individual_tools(config["target"], scan_types, config["project_type"])
+                tool_results.extend(individual_results)
+                tools_run.extend([r["tool"] for r in individual_results if r.get("success")])
         else:
             # Fall back to individual tools
             log("Falling back to individual security tools...")
